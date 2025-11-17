@@ -68,6 +68,6 @@ MENU_HELP: Final[str] = "Помощь"
 MENU_SUBSCRIBE: Final[str] = "Проверка подписки"
 
 ADMIN_PANEL_MAIN: Final[str] = (
-    "Админ панель\n\n"
+    "Админ \n\n"
     "Выберите действие:"
 )
