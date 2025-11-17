@@ -18,3 +18,4 @@ build/
 *.md
 data/database.json
 .DS_Store
+.env.example
