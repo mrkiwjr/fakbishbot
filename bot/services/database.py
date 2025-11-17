@@ -1,140 +1,159 @@
-import json
 import os
+import aiosqlite
 from datetime import datetime
 from typing import Optional
-from dataclasses import dataclass, asdict
 
 from bot.config import DATABASE_PATH
-
-
-@dataclass
-class User:
-    user_id: int
-    first_name: str
-    username: Optional[str]
-    joined_at: str
-
-
-@dataclass
-class Promo:
-    code: str
-    expiry_date: str
-    created_at: str
-    active: bool = True
-
-
-@dataclass
-class PromoUsage:
-    user_id: int
-    promo_code: str
-    received_at: str
 
 
 class Database:
     def __init__(self):
         self._ensure_data_dir()
-        self.data = self._load()
+        self.db_path = DATABASE_PATH
 
     def _ensure_data_dir(self):
         os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
 
-    def _load(self) -> dict:
-        if not os.path.exists(DATABASE_PATH):
-            return {"users": [], "promos": [], "promo_usage": []}
+    async def init_db(self):
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    username TEXT,
+                    joined_at TEXT NOT NULL
+                )
+            """)
 
-        try:
-            with open(DATABASE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"users": [], "promos": [], "promo_usage": []}
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS promos (
+                    code TEXT PRIMARY KEY,
+                    expiry_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1
+                )
+            """)
 
-    def _save(self):
-        with open(DATABASE_PATH, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=2)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS promo_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    promo_code TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id),
+                    FOREIGN KEY (promo_code) REFERENCES promos(code),
+                    UNIQUE(user_id, promo_code)
+                )
+            """)
 
-    def add_user(self, user_id: int, first_name: str, username: Optional[str] = None):
-        if not self.get_user(user_id):
-            user = User(
-                user_id=user_id,
-                first_name=first_name,
-                username=username,
-                joined_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
-            self.data["users"].append(asdict(user))
-            self._save()
-            return True
-        return False
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_expiry ON promos(expiry_date)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_active ON promos(active)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON promo_usage(user_id)")
 
-    def get_user(self, user_id: int) -> Optional[dict]:
-        for user in self.data["users"]:
-            if user["user_id"] == user_id:
-                return user
-        return None
+            await conn.commit()
 
-    def get_all_users(self) -> list[dict]:
-        return self.data["users"]
+    async def add_user(self, user_id: int, first_name: str, username: Optional[str] = None) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO users (user_id, first_name, username, joined_at) VALUES (?, ?, ?, ?)",
+                    (user_id, first_name, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                await conn.commit()
+                return True
+            except aiosqlite.IntegrityError:
+                return False
 
-    def get_users_count(self) -> int:
-        return len(self.data["users"])
+    async def get_user(self, user_id: int) -> Optional[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM users WHERE user_id = ?", (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
-    def add_promo(self, code: str, expiry_date: str) -> bool:
-        promo = Promo(
-            code=code,
-            expiry_date=expiry_date,
-            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            active=True
-        )
-        self.data["promos"].append(asdict(promo))
-        self._save()
-        return True
+    async def get_all_users(self) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("SELECT * FROM users") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
-    def get_active_promos(self) -> list[dict]:
+    async def get_users_count(self) -> int:
+        async with aiosqlite.connect(self.db_path) as conn:
+            async with conn.execute("SELECT COUNT(*) FROM users") as cursor:
+                result = await cursor.fetchone()
+                return result[0]
+
+    async def add_promo(self, code: str, expiry_date: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO promos (code, expiry_date, created_at, active) VALUES (?, ?, ?, 1)",
+                    (code, expiry_date, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                await conn.commit()
+                return True
+            except aiosqlite.IntegrityError:
+                return False
+
+    async def get_active_promos(self) -> list[dict]:
         now = datetime.now().strftime("%Y-%m-%d")
-        return [
-            promo for promo in self.data["promos"]
-            if promo["active"] and promo["expiry_date"] >= now
-        ]
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM promos WHERE active = 1 AND expiry_date >= ? ORDER BY created_at DESC",
+                (now,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
-    def get_all_promos(self) -> list[dict]:
-        return self.data["promos"]
+    async def get_all_promos(self) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("SELECT * FROM promos ORDER BY created_at DESC") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
-    def deactivate_promo(self, code: str) -> bool:
-        for promo in self.data["promos"]:
-            if promo["code"] == code:
-                promo["active"] = False
-                self._save()
-                return True
-        return False
+    async def deactivate_promo(self, code: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("UPDATE promos SET active = 0 WHERE code = ?", (code,))
+            await conn.commit()
+            return conn.total_changes > 0
 
-    def delete_promo(self, code: str) -> bool:
-        initial_length = len(self.data["promos"])
-        self.data["promos"] = [p for p in self.data["promos"] if p["code"] != code]
+    async def delete_promo(self, code: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM promos WHERE code = ?", (code,))
+            await conn.commit()
+            return conn.total_changes > 0
 
-        if len(self.data["promos"]) < initial_length:
-            self._save()
-            return True
-        return False
+    async def record_promo_usage(self, user_id: int, promo_code: str):
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "INSERT INTO promo_usage (user_id, promo_code, received_at) VALUES (?, ?, ?)",
+                (user_id, promo_code, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            await conn.commit()
 
-    def record_promo_usage(self, user_id: int, promo_code: str):
-        usage = PromoUsage(
-            user_id=user_id,
-            promo_code=promo_code,
-            received_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-        self.data["promo_usage"].append(asdict(usage))
-        self._save()
+    async def check_promo_usage(self, user_id: int, promo_code: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            async with conn.execute(
+                "SELECT 1 FROM promo_usage WHERE user_id = ? AND promo_code = ?",
+                (user_id, promo_code)
+            ) as cursor:
+                result = await cursor.fetchone()
+                return result is not None
 
-    def check_promo_usage(self, user_id: int, promo_code: str) -> bool:
-        for usage in self.data["promo_usage"]:
-            if usage["user_id"] == user_id and usage["promo_code"] == promo_code:
-                return True
-        return False
-
-    def get_user_promo_history(self, user_id: int) -> list[dict]:
-        return [
-            usage for usage in self.data["promo_usage"]
-            if usage["user_id"] == user_id
-        ]
+    async def get_user_promo_history(self, user_id: int) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM promo_usage WHERE user_id = ? ORDER BY received_at DESC",
+                (user_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
 
 db = Database()

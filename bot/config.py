@@ -6,10 +6,10 @@ load_dotenv()
 
 BOT_TOKEN: Final[str] = os.getenv("BOT_TOKEN", "")
 ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "0"))
-CHANNEL_ID: Final[int] = -1003364015670
-CHANNEL_USERNAME: Final[str] = "@testtestpromik"
+CHANNEL_ID: Final[int] = int(os.getenv("CHANNEL_ID", "-1002243728868"))
+CHANNEL_USERNAME: Final[str] = os.getenv("CHANNEL_USERNAME", "@katanaistra")
 
-DATABASE_PATH: Final[str] = "data/database.json"
+DATABASE_PATH: Final[str] = "data/database.db"
 LOGS_PATH: Final[str] = "data/bot.log"
 BACKUP_DIR: Final[str] = "data/backups"
 
