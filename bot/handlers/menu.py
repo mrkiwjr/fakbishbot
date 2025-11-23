@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 
-from bot.config import CHANNEL_USERNAME, ADMIN_ID
+from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID
 from bot.constants import (
     MENU_MAIN,
     NOT_SUBSCRIBED_MESSAGE,
@@ -222,29 +222,20 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    keyboard = [
-        [InlineKeyboardButton("🕐 Бронь на 1 час", callback_data="book_1h")],
-        [InlineKeyboardButton("🕑 Бронь на 2 часа", callback_data="book_2h")],
-        [InlineKeyboardButton("🕒 Бронь на 3 часа", callback_data="book_3h")],
-        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
-    ]
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
         text=BOOK_PC_MESSAGE,
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
 
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    keyboard = [
-        [InlineKeyboardButton("⭐ Оценить сервис", callback_data="rate_service")],
-        [InlineKeyboardButton("💬 Написать отзыв", callback_data="write_review")],
-        [InlineKeyboardButton("📞 Связаться с поддержкой", callback_data="contact_support")],
-        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
-    ]
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -256,12 +247,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    keyboard = [
-        [InlineKeyboardButton("🎁 Текущие акции", callback_data="current_promotions")],
-        [InlineKeyboardButton("📅 Спецпредложения", callback_data="special_offers")],
-        [InlineKeyboardButton("👥 Реферальная программа", callback_data="referral_program")],
-        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
-    ]
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -269,22 +255,65 @@ async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+
 async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    keyboard = [
-        [InlineKeyboardButton("💻 Стандарт", callback_data="tariff_standard")],
-        [InlineKeyboardButton("⚡ Премиум", callback_data="tariff_premium")],
-        [InlineKeyboardButton("🎮 Гейминг", callback_data="tariff_gaming")],
-        [InlineKeyboardButton("📊 Сравнить тарифы", callback_data="compare_tariffs")],
-        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
-    ]
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
         text=TARIFFS_MESSAGE,
         reply_markup=reply_markup
     )
+
+
+async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового сообщения с данными бронирования"""
+    user = update.effective_user
+    message_text = update.message.text
+    
+    # Пропускаем сообщения не в основном чате
+    if update.message.chat.type != 'private':
+        return
+    
+    # Формируем сообщение для админа
+    admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
+                   f"*Клиент:*\n" \
+                   f"👤 {user.first_name}\n" \
+                   f"📱 @{user.username if user.username else 'нет username'}\n" \
+                   f"🆔 ID: {user.id}\n\n" \
+                   f"*Данные брони:*\n`{message_text}`\n\n" \
+                   f"⏰ *Время заявки:* {update.message.date.strftime('%d.%m.%Y %H:%M')}"
+    
+    user_confirmation = "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони."
+
+    try:
+        # Отправляем сообщение админу в личку
+        await context.bot.send_message(
+            chat_id=ADMIN_USERNAME,
+            text=admin_message,
+            parse_mode='Markdown'
+        )
+        
+        # Отправляем уведомление в группу/канал
+        await context.bot.send_message(
+            chat_id=NOTIFICATION_CHAT_ID,
+            text=admin_message,
+            parse_mode='Markdown'
+        )
+        
+        # Подтверждение пользователю
+        await update.message.reply_text(
+            user_confirmation,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        print(f"Ошибка отправки уведомления: {e}")
+        await update.message.reply_text(
+            "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
+        )
 
 
 async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_TYPE):

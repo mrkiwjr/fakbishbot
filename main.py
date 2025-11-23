@@ -13,7 +13,7 @@ from telegram.ext import (
 
 from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH
 from bot.services.database import db
-from bot.handlers.menu import menu_start, menu_callback, help_command
+from bot.handlers.menu import menu_start, menu_callback, help_command, handle_book_pc_message
 from bot.handlers.admin import (
     admin_panel,
     button_callback,
@@ -116,6 +116,12 @@ def main():
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(admin_conv_handler)
     application.add_handler(CallbackQueryHandler(menu_callback))
+    
+    # ДОБАВЛЯЕМ ЭТУ СТРОКУ - обработчик текстовых сообщений для бронирования
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+        handle_book_pc_message
+    ))
 
     logger.info("Бот запущен успешно")
     application.run_polling(allowed_updates=["message", "callback_query"])
@@ -123,3 +129,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

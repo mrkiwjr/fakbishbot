@@ -17,3 +17,7 @@ BROADCAST_COOLDOWN_MINUTES: Final[int] = 2
 MESSAGE_DELAY_SECONDS: Final[float] = 0.3
 
 PROMO_CHECK_INTERVAL_HOURS: Final[int] = 24
+
+# Бронирование и уведомления
+ADMIN_USERNAME = "@katana8pro"
+NOTIFICATION_CHAT_ID = -1001712750879
