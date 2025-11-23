@@ -1,5 +1,4 @@
-import os
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 
@@ -22,8 +21,11 @@ from bot.services.subscription import check_subscription
 from bot.services.promo import promo_service
 from bot.middleware.message_cleanup import message_cleanup
 
+import os
 
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
+
+# Путь к фото
 PHOTO_PATH = os.path.join(os.path.dirname(__file__), '..', 'media', 'katana.jpg')
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
@@ -255,9 +257,13 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    received_promo = await promo_service.give_promo_to_user(user_id)
-
+    # ИЗМЕНЕНИЕ: получаем случайный промокод вместо фиксированного
+    received_promo = await promo_service.get_random_active_promo()
+    
     if received_promo:
+        # Отмечаем что пользователь получил промокод
+        await promo_service.mark_promo_received(user_id, received_promo["code"])
+        
         keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=str(MAIN))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
