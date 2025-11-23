@@ -1,3 +1,4 @@
+import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
@@ -23,7 +24,7 @@ from bot.middleware.message_cleanup import message_cleanup
 
 
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
-
+PHOTO_PATH = os.path.join(os.path.dirname(__file__), '..', 'media', 'katana.jpg')
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
     keyboard = [
@@ -42,22 +43,64 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if edit:
-        query = update.callback_query
-        await query.edit_message_text(
-            text=MENU_MAIN,
-            reply_markup=reply_markup
-        )
+    try:
+        # Пытаемся отправить фото с меню
+        if os.path.exists(PHOTO_PATH):
+            if edit:
+                query = update.callback_query
+                # Для редактирования сначала удаляем старое сообщение и отправляем новое с фото
+                await query.delete_message()
+                response = await update.effective_chat.send_photo(
+                    photo=InputFile(PHOTO_PATH),
+                    caption=MENU_MAIN,
+                    reply_markup=reply_markup
+                )
+            else:
+                response = await update.effective_chat.send_photo(
+                    photo=InputFile(PHOTO_PATH),
+                    caption=MENU_MAIN,
+                    reply_markup=reply_markup
+                )
+        else:
+            # Если фото не найдено, отправляем текстовое сообщение
+            if edit:
+                query = update.callback_query
+                await query.edit_message_text(
+                    text=MENU_MAIN,
+                    reply_markup=reply_markup
+                )
+                response = query.message
+            else:
+                response = await update.message.reply_text(
+                    text=MENU_MAIN,
+                    reply_markup=reply_markup
+                )
+        
         await message_cleanup.track_bot_message(
             update.effective_chat.id,
-            query.message.message_id,
+            response.message_id,
             context
         )
-    else:
-        await update.message.reply_text(
-            text=MENU_MAIN,
-            reply_markup=reply_markup
-        )
+        
+    except Exception as e:
+        print(f"Ошибка при отправке меню: {e}")
+        # Fallback на текстовое меню
+        if edit:
+            query = update.callback_query
+            await query.edit_message_text(
+                text=MENU_MAIN,
+                reply_markup=reply_markup
+            )
+            await message_cleanup.track_bot_message(
+                update.effective_chat.id,
+                query.message.message_id,
+                context
+            )
+        else:
+            await update.message.reply_text(
+                text=MENU_MAIN,
+                reply_markup=reply_markup
+            )
 
 
 async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -71,29 +114,55 @@ async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await message_cleanup.cleanup_user_command(update, context)
 
-    response = await update.effective_chat.send_message(
-        text=MENU_MAIN,
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🎁 Получить промокод", callback_data=str(PROMO)),
-                InlineKeyboardButton("💻 Забронировать ПК", callback_data=str(BOOK_PC))
-            ],
-            [
-                InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
-                InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
-            ],
-            [
-                InlineKeyboardButton("📝 Обратная связь", callback_data=str(FEEDBACK)),
-                InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
-            ]
-        ])
-    )
+    keyboard = [
+        [
+            InlineKeyboardButton("🎁 Получить промокод", callback_data=str(PROMO)),
+            InlineKeyboardButton("💻 Забронировать ПК", callback_data=str(BOOK_PC))
+        ],
+        [
+            InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
+            InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
+        ],
+        [
+            InlineKeyboardButton("📝 Обратная связь", callback_data=str(FEEDBACK)),
+            InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await message_cleanup.track_bot_message(
-        update.effective_chat.id,
-        response.message_id,
-        context
-    )
+    try:
+        # Пытаемся отправить фото с меню
+        if os.path.exists(PHOTO_PATH):
+            response = await update.effective_chat.send_photo(
+                photo=InputFile(PHOTO_PATH),
+                caption=MENU_MAIN,
+                reply_markup=reply_markup
+            )
+        else:
+            # Если фото не найдено, отправляем текстовое сообщение
+            response = await update.effective_chat.send_message(
+                text=MENU_MAIN,
+                reply_markup=reply_markup
+            )
+        
+        await message_cleanup.track_bot_message(
+            update.effective_chat.id,
+            response.message_id,
+            context
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при отправке стартового сообщения: {e}")
+        # Fallback на текстовое сообщение
+        response = await update.effective_chat.send_message(
+            text=MENU_MAIN,
+            reply_markup=reply_markup
+        )
+        await message_cleanup.track_bot_message(
+            update.effective_chat.id,
+            response.message_id,
+            context
+        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -281,11 +350,9 @@ async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_T
     admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
                    f"*Клиент:*\n" \
                    f"👤 {user.first_name}\n" \
-                   f"📱 @{user.username if user.username else 'нет username'}\n" \
-                   f"🆔 ID: {user.id}\n\n" \
+                   f"@{user.username if user.username else 'нет username'}\n" \
                    f"*Данные брони:*\n`{message_text}`\n\n" \
-                   f"⏰ *Время заявки:* {update.message.date.strftime('%d.%m.%Y %H:%M')}"
-
+                   
 
     try:
         # Отправляем только в группу (это точно работает)

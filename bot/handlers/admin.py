@@ -8,7 +8,7 @@ from bot.services.database import db
 from bot.services.promo import promo_service
 from bot.middleware.message_cleanup import message_cleanup
 
-AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM = range(5)
+AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE = range(6)
 ADMIN_MAIN = "admin_main"
 
 
