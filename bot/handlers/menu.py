@@ -10,7 +10,11 @@ from bot.constants import (
     PROMO_ALREADY_RECEIVED_MESSAGE,
     NO_ACTIVE_PROMO_MESSAGE,
     HELP_USER_MESSAGE,
-    HELP_ADMIN_MESSAGE
+    HELP_ADMIN_MESSAGE,
+    BOOK_PC_MESSAGE,
+    FEEDBACK_MESSAGE,
+    PROMOTIONS_MESSAGE,
+    TARIFFS_MESSAGE
 )
 from bot.services.database import db
 from bot.services.subscription import check_subscription
@@ -18,13 +22,21 @@ from bot.services.promo import promo_service
 from bot.middleware.message_cleanup import message_cleanup
 
 
-MAIN, PROMO, HELP = range(3)
+MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
     keyboard = [
         [
             InlineKeyboardButton("🎁 Получить промокод", callback_data=str(PROMO)),
+            InlineKeyboardButton("💻 Забронировать ПК", callback_data=str(BOOK_PC))
+        ],
+        [
+            InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
+            InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
+        ],
+        [
+            InlineKeyboardButton("📝 Обратная связь", callback_data=str(FEEDBACK)),
             InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
         ]
     ]
@@ -64,6 +76,14 @@ async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("🎁 Получить промокод", callback_data=str(PROMO)),
+                InlineKeyboardButton("💻 Забронировать ПК", callback_data=str(BOOK_PC))
+            ],
+            [
+                InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
+                InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
+            ],
+            [
+                InlineKeyboardButton("📝 Обратная связь", callback_data=str(FEEDBACK)),
                 InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
             ]
         ])
@@ -108,6 +128,18 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == str(HELP):
         await handle_help(update, context)
+
+    elif data == str(BOOK_PC):
+        await handle_book_pc(update, context)
+
+    elif data == str(FEEDBACK):
+        await handle_feedback(update, context)
+
+    elif data == str(PROMOTIONS):
+        await handle_promotions(update, context)
+
+    elif data == str(TARIFFS):
+        await handle_tariffs(update, context)
 
     elif data == "subscribe_check":
         await handle_subscribe_check(update, context)
@@ -187,6 +219,74 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    keyboard = [
+        [InlineKeyboardButton("🕐 Бронь на 1 час", callback_data="book_1h")],
+        [InlineKeyboardButton("🕑 Бронь на 2 часа", callback_data="book_2h")],
+        [InlineKeyboardButton("🕒 Бронь на 3 часа", callback_data="book_3h")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=BOOK_PC_MESSAGE,
+        reply_markup=reply_markup
+    )
+
+
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    keyboard = [
+        [InlineKeyboardButton("⭐ Оценить сервис", callback_data="rate_service")],
+        [InlineKeyboardButton("💬 Написать отзыв", callback_data="write_review")],
+        [InlineKeyboardButton("📞 Связаться с поддержкой", callback_data="contact_support")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=FEEDBACK_MESSAGE,
+        reply_markup=reply_markup
+    )
+
+
+async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    keyboard = [
+        [InlineKeyboardButton("🎁 Текущие акции", callback_data="current_promotions")],
+        [InlineKeyboardButton("📅 Спецпредложения", callback_data="special_offers")],
+        [InlineKeyboardButton("👥 Реферальная программа", callback_data="referral_program")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=PROMOTIONS_MESSAGE,
+        reply_markup=reply_markup
+    )
+
+async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    keyboard = [
+        [InlineKeyboardButton("💻 Стандарт", callback_data="tariff_standard")],
+        [InlineKeyboardButton("⚡ Премиум", callback_data="tariff_premium")],
+        [InlineKeyboardButton("🎮 Гейминг", callback_data="tariff_gaming")],
+        [InlineKeyboardButton("📊 Сравнить тарифы", callback_data="compare_tariffs")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=TARIFFS_MESSAGE,
+        reply_markup=reply_markup
+    )
+
+
 async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
@@ -211,3 +311,4 @@ async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_T
         except BadRequest as e:
             if "message is not modified" not in str(e).lower():
                 raise
+            
