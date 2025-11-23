@@ -273,11 +273,11 @@ async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
     message_text = update.message.text
     
-    # Пропускаем сообщения не в основном чате
+
     if update.message.chat.type != 'private':
         return
     
-    # Формируем сообщение для админа
+
     admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
                    f"*Клиент:*\n" \
                    f"👤 {user.first_name}\n" \
@@ -285,18 +285,10 @@ async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_T
                    f"🆔 ID: {user.id}\n\n" \
                    f"*Данные брони:*\n`{message_text}`\n\n" \
                    f"⏰ *Время заявки:* {update.message.date.strftime('%d.%m.%Y %H:%M')}"
-    
-    user_confirmation = "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони."
+
 
     try:
-        # Отправляем сообщение админу в личку
-        await context.bot.send_message(
-            chat_id=ADMIN_USERNAME,
-            text=admin_message,
-            parse_mode='Markdown'
-        )
-        
-        # Отправляем уведомление в группу/канал
+        # Отправляем только в группу (это точно работает)
         await context.bot.send_message(
             chat_id=NOTIFICATION_CHAT_ID,
             text=admin_message,
@@ -305,7 +297,7 @@ async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_T
         
         # Подтверждение пользователю
         await update.message.reply_text(
-            user_confirmation,
+            "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
             parse_mode='Markdown'
         )
         
