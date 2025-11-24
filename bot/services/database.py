@@ -136,6 +136,11 @@ class Database:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    async def get_user_by_id(user_id: int):
+        query = "SELECT * FROM users WHERE user_id = $1"
+        row = await database.fetchrow(query, user_id)
+        return dict(row) if row else None
+
     async def get_all_users(self) -> list[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row

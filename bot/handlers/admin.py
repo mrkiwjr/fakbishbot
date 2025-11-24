@@ -737,25 +737,58 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_id = context.user_data.get("admin_message_id")
-
     await update.message.delete()
 
     input_text = update.message.text.strip()
-    username = input_text.lstrip('@').lower()
 
-    if not username:
+    if not input_text:
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=message_id,
-            text="❌ Username не может быть пустым. Введите username:\n\nПример: `@jemappelleilya` или `jemappelleilya`",
+            text="❌ Введите username или ID пользователя.\n\n"
+                 "Примеры:\n"
+                 "• `@jemappelleilya`\n"
+                 "• `796891410`",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return AWAITING_ADMIN_ID
 
-    user = await db.get_user_by_username(username)
+    # Попробуем распарсить как ID
+    user_id = None
+    username = None
+
+    # Удаляем возможный префикс "ID"
+    clean_input = input_text.strip().lower().replace("id", "").strip()
+
+    if clean_input.isdigit():
+        user_id = int(clean_input)
+    elif input_text.startswith("@"):
+        username = input_text.lstrip('@').lower()
+
+    if not user_id and not username:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=message_id,
+            text="❌ Введите корректный username или ID.\n\n"
+                 "Примеры:\n"
+                 "• `@jemappelleilya`\n"
+                 "• `796891410`",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return AWAITING_ADMIN_ID
+
+    # Ищем пользователя
+    user = None
+    if user_id:
+        user = await db.get_user_by_id(user_id)
+    elif username:
+        user = await db.get_user_by_username(username)
 
     if not user:
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
@@ -763,8 +796,8 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=message_id,
-            text=f"❌ Пользователь с username `@{username}` не найден в базе бота.\n\n"
-                 f"Пользователь должен хотя бы раз запустить бота командой /start",
+            text=f"❌ Пользователь не найден.\n\n"
+                 f"Убедитесь, что он запускал бота (/start).",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -772,6 +805,7 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     new_admin_id = user['user_id']
     first_name = user['first_name']
+    username_to_show = user['username'] or "без username"
 
     if new_admin_id == ADMIN_ID:
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
@@ -797,15 +831,14 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return ConversationHandler.END
 
-    if await db.add_admin(new_admin_id, first_name, ADMIN_ID, username):
-        text = f"✅ Пользователь *{first_name}* (@{username}) добавлен как администратор"
-        logger.info(f"Добавлен новый администратор: {first_name} (@{username}, ID: {new_admin_id})")
+    if await db.add_admin(new_admin_id, first_name, ADMIN_ID, user['username']):
+        text = f"✅ Пользователь *{first_name}* (@{username_to_show}) добавлен как администратор"
+        logger.info(f"Добавлен новый администратор: {first_name} (ID: {new_admin_id})")
     else:
         text = "❌ Ошибка при добавлении администратора"
 
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     await context.bot.edit_message_text(
         chat_id=update.effective_chat.id,
         message_id=message_id,
@@ -813,7 +846,6 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
-
     context.user_data.clear()
     return ConversationHandler.END
 
