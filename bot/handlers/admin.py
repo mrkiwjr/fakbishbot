@@ -1,32 +1,63 @@
 import os
+import logging
 from typing import Optional
+from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 
-from bot.config import ADMIN_ID
+from bot.config import (
+    ADMIN_ID,
+    DEFAULT_PROMO_DAYS,
+    MIN_PROMO_DAYS,
+    MAX_PROMO_DAYS,
+    MAX_PROMO_CODE_LENGTH
+)
 from bot.constants import ADMIN_ONLY_MESSAGE, ADMIN_PANEL_MAIN
 from bot.services.database import db
 from bot.services.promo import promo_service
 from bot.middleware.message_cleanup import message_cleanup
 
-AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE = range(6)
+logger = logging.getLogger(__name__)
+
+AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE, AWAITING_ADMIN_ID, AWAITING_FILE_EXPIRY_DATE, AWAITING_FILE_EXPIRY_TIME = range(9)
 ADMIN_MAIN = "admin_main"
 
 PROMO_FILES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'promo_files')
 os.makedirs(PROMO_FILES_DIR, exist_ok=True)
 
+async def is_user_admin(user_id: int) -> bool:
+    if user_id == ADMIN_ID:
+        return True
+    return await db.is_admin(user_id)
+
+
+def is_super_admin(user_id: int) -> bool:
+    return user_id == ADMIN_ID
+
+
 def admin_required(func):
-    """Декоратор для проверки прав администратора"""
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id != ADMIN_ID:
+        if not await is_user_admin(update.effective_user.id):
             await update.message.reply_text(ADMIN_ONLY_MESSAGE)
             return ConversationHandler.END
         return await func(update, context)
     return wrapper
 
 
+def super_admin_required(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not is_super_admin(update.effective_user.id):
+            if update.callback_query:
+                await update.callback_query.answer("Эта функция доступна только главному администратору.", show_alert=True)
+            else:
+                await update.message.reply_text("Эта функция доступна только главному администратору.")
+            return ConversationHandler.END
+        return await func(update, context)
+    return wrapper
+
+
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
-    """Показать меню администратора"""
+    user_id = update.effective_user.id
     keyboard = [
         [
             InlineKeyboardButton("➕ Добавить промокод", callback_data="add_promo"),
@@ -36,10 +67,19 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ed
             InlineKeyboardButton("📁 Загрузить файл с промокодами", callback_data="upload_promo_file")
         ],
         [
+            InlineKeyboardButton("📜 История выдачи", callback_data="promo_history")
+        ],
+        [
             InlineKeyboardButton("📊 Статистика", callback_data="stats"),
             InlineKeyboardButton("📤 Рассылка", callback_data="broadcast_menu")
         ]
     ]
+
+    if is_super_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("👥 Управление админами", callback_data="manage_admins")
+        ])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if edit:
@@ -62,24 +102,34 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ed
 
 @admin_required
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /admin"""
     await message_cleanup.cleanup_user_command(update, context)
+
+    user_id = update.effective_user.id
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Добавить промокод", callback_data="add_promo"),
+            InlineKeyboardButton("📋 Список промокодов", callback_data="list_promos")
+        ],
+        [
+            InlineKeyboardButton("📁 Загрузить файл с промокодами", callback_data="upload_promo_file")
+        ],
+        [
+            InlineKeyboardButton("📜 История выдачи", callback_data="promo_history")
+        ],
+        [
+            InlineKeyboardButton("📊 Статистика", callback_data="stats"),
+            InlineKeyboardButton("📤 Рассылка", callback_data="broadcast_menu")
+        ]
+    ]
+
+    if is_super_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("👥 Управление админами", callback_data="manage_admins")
+        ])
 
     response = await update.effective_chat.send_message(
         text=ADMIN_PANEL_MAIN,
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("➕ Добавить промокод", callback_data="add_promo"),
-                InlineKeyboardButton("📋 Список промокодов", callback_data="list_promos")
-            ],
-            [
-                InlineKeyboardButton("📁 Загрузить файл с промокодами", callback_data="upload_promo_file")
-            ],
-            [
-                InlineKeyboardButton("📊 Статистика", callback_data="stats"),
-                InlineKeyboardButton("📤 Рассылка", callback_data="broadcast_menu")
-            ]
-        ])
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
     await message_cleanup.track_bot_message(
@@ -88,78 +138,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context
     )
 
-async def receive_promo_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженного файла с промокодами"""
-    message_id = context.user_data.get("admin_message_id")
-    
-    if not update.message.document:
-        await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл.")
-        return AWAITING_PROMO_FILE
-    
-    document = update.message.document
-    file_extension = document.file_name.split('.')[-1].lower() if document.file_name else ''
-    
-    if file_extension not in ['txt', 'text']:
-        await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл (.txt)")
-        return AWAITING_PROMO_FILE
-    
-    try:
-        # Скачиваем файл
-        file = await document.get_file()
-        file_path = os.path.join(PROMO_FILES_DIR, f"promo_{document.file_name}")
-        await file.download_to_drive(file_path)
-        
-        # Читаем промокоды из файла
-        with open(file_path, 'r', encoding='utf-8') as f:
-            promo_codes = [line.strip() for line in f if line.strip()]
-        
-        if not promo_codes:
-            await update.message.reply_text("❌ Файл пуст или содержит только пустые строки")
-            return AWAITING_PROMO_FILE
-        
-        # Сохраняем промокоды в базу
-        added_count = 0
-        days = 7  # По умолчанию 7 дней
-        
-        for code in promo_codes:
-            if code and len(code) > 0 and await promo_service.create_promo(code, days):
-                added_count += 1
-        
-        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            f"✅ *Файл успешно обработан!*\n\n"
-            f"📁 Файл: `{document.file_name}`\n"
-            f"🎫 Промокодов в файле: `{len(promo_codes)}`\n"
-            f"✅ Добавлено в базу: `{added_count}`\n"
-            f"📅 Срок действия: `{days}` дней",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        
-        # Удаляем служебные сообщения
-        await update.message.delete()
-        if message_id:
-            try:
-                await context.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=message_id
-                )
-            except Exception:
-                pass
-        
-        context.user_data.clear()
-        return ConversationHandler.END
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при обработке файла: `{str(e)}`", parse_mode='Markdown')
-        return AWAITING_PROMO_FILE
-    
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик callback кнопок"""
     query = update.callback_query
+
+    if not await is_user_admin(update.effective_user.id):
+        await query.answer("Эта команда доступна только администратору.", show_alert=True)
+        return ConversationHandler.END
+
     await query.answer()
 
     if query.data == ADMIN_MAIN:
@@ -234,22 +220,54 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Ошибка удаления", reply_markup=reply_markup)
         return ConversationHandler.END
 
+    elif query.data == "promo_history":
+        usage_history = await db.get_promo_usage_with_users()
+
+        if not usage_history:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=ADMIN_MAIN)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("История выдачи промокодов пуста", reply_markup=reply_markup)
+            return ConversationHandler.END
+
+        text = "📜 *История выдачи промокодов*\n\n"
+        for idx, entry in enumerate(usage_history[:20], 1):
+            username = f"@{entry['username']}" if entry['username'] else "без username"
+            text += (
+                f"{idx}. *{entry['promo_code']}*\n"
+                f"   👤 {entry['first_name']} ({username})\n"
+                f"   🆔 User ID: `{entry['user_id']}`\n"
+                f"   🕐 Выдан: {entry['received_at']}\n"
+                f"   📅 Срок: до {entry['expiry_date']}\n\n"
+            )
+
+        if len(usage_history) > 20:
+            text += f"_Показано 20 из {len(usage_history)} записей_"
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return ConversationHandler.END
+
     elif query.data == "stats":
         users_count = await db.get_users_count()
         promos = await promo_service.get_all_promos()
         active_promos = len([p for p in promos if p["active"]])
+        unused_promos = await db.get_unused_active_promos()
+        usage_history = await db.get_promo_usage_with_users()
 
-        # Получаем статистику по файлам промокодов
         promo_files = await get_promo_files_stats()
-        
+
         text = (
             f"📊 *Статистика бота*\n\n"
             f"👥 Пользователей: *{users_count}*\n"
             f"🎫 Всего промокодов: *{len(promos)}*\n"
             f"✅ Активных промокодов: *{active_promos}*\n"
+            f"🆓 Неиспользованных активных: *{len(unused_promos)}*\n"
+            f"📤 Выдано промокодов: *{len(usage_history)}*\n"
             f"📁 Файлов с промокодами: *{len(promo_files)}*\n"
         )
-        
+
         if promo_files:
             total_codes = sum(stats['count'] for stats in promo_files.values())
             text += f"📊 Промокодов в файлах: *{total_codes}*"
@@ -270,6 +288,93 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["admin_message_id"] = query.message.message_id
         return AWAITING_BROADCAST_TEXT
 
+    elif query.data == "manage_admins":
+        if not is_super_admin(update.effective_user.id):
+            await query.answer("Эта функция доступна только главному администратору.", show_alert=True)
+            return ConversationHandler.END
+
+        admins = await db.get_all_admins()
+        text = "👥 *Управление администраторами*\n\n"
+
+        if admins:
+            text += "📋 Список администраторов:\n\n"
+            for admin in admins:
+                username = f"@{admin['username']}" if admin['username'] else "без username"
+                text += f"• {admin['first_name']} ({username})\n"
+                text += f"  ID: `{admin['user_id']}`\n"
+                text += f"  Добавлен: {admin['added_at']}\n\n"
+        else:
+            text += "Дополнительных администраторов нет\n\n"
+
+        keyboard = [
+            [InlineKeyboardButton("➕ Добавить админа", callback_data="add_admin")],
+        ]
+
+        if admins:
+            keyboard.append([InlineKeyboardButton("🗑 Удалить админа", callback_data="remove_admin_menu")])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=ADMIN_MAIN)])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return ConversationHandler.END
+
+    elif query.data == "add_admin":
+        if not is_super_admin(update.effective_user.id):
+            await query.answer("Эта функция доступна только главному администратору.", show_alert=True)
+            return ConversationHandler.END
+
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Введите username пользователя, которого хотите сделать администратором:\n\n"
+            "Пример: `@jemappelleilya` или `jemappelleilya`",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        context.user_data["admin_message_id"] = query.message.message_id
+        return AWAITING_ADMIN_ID
+
+    elif query.data == "remove_admin_menu":
+        if not is_super_admin(update.effective_user.id):
+            await query.answer("Эта функция доступна только главному администратору.", show_alert=True)
+            return ConversationHandler.END
+
+        admins = await db.get_all_admins()
+        if not admins:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Нет администраторов для удаления", reply_markup=reply_markup)
+            return ConversationHandler.END
+
+        keyboard = []
+        for admin in admins:
+            username = f"@{admin['username']}" if admin['username'] else admin['first_name']
+            keyboard.append([InlineKeyboardButton(
+                f"🗑 {username} (ID: {admin['user_id']})",
+                callback_data=f"remove_admin_{admin['user_id']}"
+            )])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Выберите администратора для удаления:", reply_markup=reply_markup)
+        return ConversationHandler.END
+
+    elif query.data.startswith("remove_admin_"):
+        if not is_super_admin(update.effective_user.id):
+            await query.answer("Эта функция доступна только главному администратору.", show_alert=True)
+            return ConversationHandler.END
+
+        admin_id = int(query.data.replace("remove_admin_", ""))
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if await db.remove_admin(admin_id):
+            await query.edit_message_text(f"✅ Администратор (ID: `{admin_id}`) удален", reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await query.edit_message_text("❌ Ошибка удаления", reply_markup=reply_markup)
+        return ConversationHandler.END
+
     elif query.data == "cancel":
         keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -278,70 +383,65 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def receive_promo_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженного файла с промокодами"""
     message_id = context.user_data.get("admin_message_id")
-    
+
     if not update.message.document:
         await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл.")
         return AWAITING_PROMO_FILE
-    
+
     document = update.message.document
     file_extension = document.file_name.split('.')[-1].lower() if document.file_name else ''
-    
+
     if file_extension not in ['txt', 'text']:
         await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл (.txt)")
         return AWAITING_PROMO_FILE
-    
+
     try:
-        # Скачиваем файл
         file = await document.get_file()
         file_path = os.path.join(PROMO_FILES_DIR, f"promo_{document.file_name}")
         await file.download_to_drive(file_path)
-        
-        # Читаем промокоды из файла
+
         with open(file_path, 'r', encoding='utf-8') as f:
             promo_codes = [line.strip() for line in f if line.strip()]
-        
+
         if not promo_codes:
             await update.message.reply_text("❌ Файл пуст или содержит только пустые строки")
             return AWAITING_PROMO_FILE
-        
-        # Сохраняем промокоды в базу
-        added_count = 0
-        days = 7  # По умолчанию 7 дней
-        
-        for code in promo_codes:
-            if code and len(code) > 0 and await promo_service.create_promo(code, days):
-                added_count += 1
-        
-        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            f"✅ *Файл успешно обработан!*\n\n"
-            f"📁 Файл: `{document.file_name}`\n"
-            f"🎫 Промокодов в файле: `{len(promo_codes)}`\n"
-            f"✅ Добавлено в базу: `{added_count}`\n"
-            f"📅 Срок действия: `{days}` дней",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        
-        # Удаляем служебные сообщения
+
+        invalid_codes = [code for code in promo_codes if len(code) > MAX_PROMO_CODE_LENGTH]
+        valid_codes = [code for code in promo_codes if len(code) <= MAX_PROMO_CODE_LENGTH]
+
+        context.user_data["promo_file_path"] = file_path
+        context.user_data["promo_file_name"] = document.file_name
+        context.user_data["promo_codes"] = valid_codes
+        context.user_data["invalid_codes_count"] = len(invalid_codes)
+
         await update.message.delete()
-        if message_id:
-            try:
-                await context.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=message_id
-                )
-            except Exception:
-                pass
-        
-        context.user_data.clear()
-        return ConversationHandler.END
-        
+
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=(
+                    f"📁 Файл загружен: `{document.file_name}`\n"
+                    f"🎫 Промокодов: `{len(valid_codes)}`\n\n"
+                    f"Введите дату окончания срока действия:\n\n"
+                    f"Формат: `ДД.МM.ГГ`\n"
+                    f"Пример: `27.11.25`"
+                ),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+        return AWAITING_FILE_EXPIRY_DATE
+
     except Exception as e:
+        logger.error(f"Ошибка при обработке файла с промокодами: {e}")
         await update.message.reply_text(f"❌ Ошибка при обработке файла: `{str(e)}`", parse_mode='Markdown')
         return AWAITING_PROMO_FILE
 
@@ -368,6 +468,34 @@ async def receive_promo_code(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.delete()
 
+    if not code:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text="❌ Промокод не может быть пустым. Введите промокод:",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+        return AWAITING_PROMO_CODE
+
+    if len(code) > MAX_PROMO_CODE_LENGTH:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=f"❌ Промокод слишком длинный (макс. {MAX_PROMO_CODE_LENGTH} символов). Введите другой промокод:",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+        return AWAITING_PROMO_CODE
+
     if message_id:
         context.user_data["new_promo_code"] = code
 
@@ -378,12 +506,12 @@ async def receive_promo_code(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=message_id,
-                text=f"Промокод: `{code}`\n\nВведите количество дней действия (например, 7):",
+                text=f"Промокод: `{code}`\n\nВведите количество дней действия ({MIN_PROMO_DAYS}-{MAX_PROMO_DAYS}):",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
 
         return AWAITING_PROMO_DAYS
 
@@ -400,13 +528,31 @@ async def receive_promo_days(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         days = int(update.message.text.strip())
 
+        if days < MIN_PROMO_DAYS or days > MAX_PROMO_DAYS:
+            text = f"❌ Количество дней должно быть от {MIN_PROMO_DAYS} до {MAX_PROMO_DAYS}"
+            keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=message_id,
+                    text=f"Промокод: `{code}`\n\n{text}\n\nВведите корректное число дней ({MIN_PROMO_DAYS}-{MAX_PROMO_DAYS}):",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+            return AWAITING_PROMO_DAYS
+
         if await promo_service.create_promo(code, days):
             text = f"✅ Промокод `{code}` создан на *{days}* дней"
         else:
-            text = "❌ Ошибка создания промокода"
+            text = "❌ Ошибка создания промокода (возможно, промокод уже существует)"
 
     except ValueError:
-        text = "❌ Неверный формат. Введите число."
+        text = "❌ Неверный формат. Введите число"
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -414,12 +560,12 @@ async def receive_promo_days(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=message_id,
-                text=f"Промокод: `{code}`\n\n{text}\n\nВведите корректное число дней:",
+                text=f"Промокод: `{code}`\n\n{text}\n\nВведите корректное число дней ({MIN_PROMO_DAYS}-{MAX_PROMO_DAYS}):",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
 
         return AWAITING_PROMO_DAYS
 
@@ -589,8 +735,229 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_id = context.user_data.get("admin_message_id")
+
+    await update.message.delete()
+
+    input_text = update.message.text.strip()
+    username = input_text.lstrip('@').lower()
+
+    if not username:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=message_id,
+            text="❌ Username не может быть пустым. Введите username:\n\nПример: `@jemappelleilya` или `jemappelleilya`",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return AWAITING_ADMIN_ID
+
+    user = await db.get_user_by_username(username)
+
+    if not user:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=message_id,
+            text=f"❌ Пользователь с username `@{username}` не найден в базе бота.\n\n"
+                 f"Пользователь должен хотя бы раз запустить бота командой /start",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return AWAITING_ADMIN_ID
+
+    new_admin_id = user['user_id']
+    first_name = user['first_name']
+
+    if new_admin_id == ADMIN_ID:
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=message_id,
+            text="❌ Этот пользователь уже является главным администратором",
+            reply_markup=reply_markup
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if await db.is_admin(new_admin_id):
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=message_id,
+            text="❌ Этот пользователь уже является администратором",
+            reply_markup=reply_markup
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if await db.add_admin(new_admin_id, first_name, ADMIN_ID, username):
+        text = f"✅ Пользователь *{first_name}* (@{username}) добавлен как администратор"
+        logger.info(f"Добавлен новый администратор: {first_name} (@{username}, ID: {new_admin_id})")
+    else:
+        text = "❌ Ошибка при добавлении администратора"
+
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="manage_admins")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await context.bot.edit_message_text(
+        chat_id=update.effective_chat.id,
+        message_id=message_id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def receive_file_expiry_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_id = context.user_data.get("admin_message_id")
+    await update.message.delete()
+
+    date_input = update.message.text.strip()
+
+    try:
+        date_obj = datetime.strptime(date_input, "%d.%m.%y")
+        context.user_data["expiry_date_obj"] = date_obj
+
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        file_name = context.user_data.get("promo_file_name", "файл")
+        codes_count = len(context.user_data.get("promo_codes", []))
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=(
+                    f"📁 Файл: `{file_name}`\n"
+                    f"🎫 Промокодов: `{codes_count}`\n"
+                    f"📅 Дата: `{date_obj.strftime('%d.%m.%y')}`\n\n"
+                    f"Введите время окончания срока действия:\n\n"
+                    f"Формат: `ЧЧ:ММ`\n"
+                    f"Пример: `00:30` или `23:59`"
+                ),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+        return AWAITING_FILE_EXPIRY_TIME
+
+    except ValueError:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=(
+                    f"❌ Неверный формат даты\n\n"
+                    f"Введите дату в формате `ДД.МM.ГГ`\n"
+                    f"Пример: `27.11.25`"
+                ),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+        return AWAITING_FILE_EXPIRY_DATE
+
+
+async def receive_file_expiry_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_id = context.user_data.get("admin_message_id")
+    await update.message.delete()
+
+    time_input = update.message.text.strip()
+
+    try:
+        time_obj = datetime.strptime(time_input, "%H:%M")
+        date_obj = context.user_data.get("expiry_date_obj")
+
+        expiry_datetime = date_obj.replace(hour=time_obj.hour, minute=time_obj.minute, second=0, microsecond=0)
+        expiry_date_str = expiry_datetime.strftime("%Y-%m-%d")
+
+        promo_codes = context.user_data.get("promo_codes", [])
+        invalid_count = context.user_data.get("invalid_codes_count", 0)
+        file_name = context.user_data.get("promo_file_name", "файл")
+
+        added_count = 0
+        skipped_count = 0
+
+        for code in promo_codes:
+            if await promo_service.create_promo_with_date(code, expiry_date_str):
+                added_count += 1
+            else:
+                skipped_count += 1
+
+        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        result_text = (
+            f"✅ *Файл успешно обработан!*\n\n"
+            f"📁 Файл: `{file_name}`\n"
+            f"🎫 Промокодов в файле: `{len(promo_codes)}`\n"
+            f"✅ Добавлено в базу: `{added_count}`\n"
+        )
+
+        if skipped_count > 0:
+            result_text += f"⚠️ Пропущено (дубликаты): `{skipped_count}`\n"
+
+        if invalid_count > 0:
+            result_text += f"⚠️ Пропущено (слишком длинные): `{invalid_count}`\n"
+
+        result_text += f"\n📅 Срок действия: до `{expiry_datetime.strftime('%d.%m.%y %H:%M')}`"
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=result_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+        context.user_data.clear()
+        logger.info(f"Добавлено {added_count} промокодов из файла {file_name} со сроком до {expiry_date_str}")
+        return ConversationHandler.END
+
+    except ValueError:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=(
+                    f"❌ Неверный формат времени\n\n"
+                    f"Введите время в формате `ЧЧ:ММ`\n"
+                    f"Пример: `00:30` или `23:59`"
+                ),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+
+        return AWAITING_FILE_EXPIRY_TIME
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена операции"""
     await update.message.delete()
 
     message_id = context.user_data.get("admin_message_id")

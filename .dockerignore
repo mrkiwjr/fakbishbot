@@ -19,3 +19,4 @@ build/
 data/database.json
 .DS_Store
 .env.example
+!bot/media/

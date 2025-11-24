@@ -1,8 +1,8 @@
 # KATANA Promo Bot
 
-Telegram-бот для раздачи промокодов подписчикам канала KATANA. Один юзер получает один код за период. Подписка обязательна.
+Бот для раздачи промокодов подписчикам канала KATANA (@katanaistra). Один промокод на пользователя. При удалении промокода из админки пользователь может получить новый.
 
-## Технологический стек
+## Стек
 
 ```
 Python 3.11
@@ -11,9 +11,9 @@ aiosqlite 0.20.0
 Docker + Docker Compose
 ```
 
-## Быстрый старт
+## Установка
 
-### Локальный запуск
+### Локально
 
 ```bash
 python -m venv venv
@@ -24,7 +24,7 @@ cp .env.example .env
 
 Заполнить `.env`:
 ```env
-BOT_TOKEN=your_bot_token_from_botfather
+BOT_TOKEN=токен_от_botfather
 ADMIN_ID=796891410
 CHANNEL_ID=-1002243728868
 CHANNEL_USERNAME=@katanaistra
@@ -38,77 +38,53 @@ python main.py
 ### Docker
 
 ```bash
-make build    # собрать контейнер
-make up       # запустить
-make down     # остановить
-make logs     # посмотреть логи
-make restart  # перезапустить
-```
-
-## Архитектура
-
-### Структура проекта
-
-```
-.
-├── bot/
-│   ├── handlers/
-│   │   ├── admin.py        # ConversationHandler для добавления промо
-│   │   ├── user.py         # /start, /promo, /help
-│   │   └── menu.py         # inline-клавиатуры админ-панели
-│   ├── services/
-│   │   ├── database.py     # SQLite через aiosqlite
-│   │   ├── promo.py        # валидация, выдача, проверка использования
-│   │   ├── subscription.py # проверка подписки через getChatMember
-│   │   └── broadcast.py    # массовые рассылки с rate limiting
-│   ├── middleware/         # middleware для логирования/контроля
-│   ├── config.py           # env-переменные, константы окружения
-│   └── constants.py        # текстовые шаблоны сообщений
-├── data/                   # база, логи, бэкапы
-├── main.py                 # точка входа
-└── requirements.txt
-```
-
-## Команды бота
-
-**Пользовательские:**
-- `/start` - регистрация
-- `/promo` - получить промокод
-- `/help` - инструкция
-- `/broadcast` - запрос на рассылку (для админа)
-
-**Админские:**
-- Вся работа через inline-кнопки после `/start`
-- Панель управления с навигацией
-
-## Ключевые ограничения
-
-- Rate limiting: 0.3 сек между сообщениями при broadcast
-- Cooldown для рассылок: 2 минуты между запросами
-- Один промокод на юзера за период (constraint на уровне БД)
-- Проверка подписки перед каждой выдачей
-- Автоматическая деактивация истекших промо (проверка раз в 24ч)
-
-## Конфигурация
-
-Все настройки в `bot/config.py`:
-
-```python
-CHANNEL_ID = -1002243728868
-CHANNEL_USERNAME = @katanaistra
-BROADCAST_COOLDOWN_MINUTES = 2
-MESSAGE_DELAY_SECONDS = 0.3
-PROMO_CHECK_INTERVAL_HOURS = 24
-```
-
-Тексты сообщений в `bot/constants.py` с `.format()` плейсхолдерами.
-
-
-## Логи
-
-Логи пишутся в `data/bot.log`.
-
-При запуске через Docker:
-```bash
+make build
+make up
 make logs
 ```
+
+## Структура
+
+```
+bot/
+├── handlers/
+│   ├── admin.py        # ConversationHandler для админки
+│   └── menu.py         # Inline-клавиатуры + callback handlers
+├── services/
+│   ├── database.py     # SQLite: users, promos, promo_usage
+│   ├── promo.py        # Логика выдачи промокодов
+│   ├── subscription.py # Проверка подписки на канал
+│   ├── broadcast.py    # Рассылки с rate limiting
+│   └── photo_cache.py  # Кеширование file_id для фото меню
+├── media/menu/         # Изображения для inline-меню
+├── config.py           # Env-переменные
+└── constants.py        # Тексты сообщений
+```
+
+## Основные функции
+
+**Пользователям:**
+- Получение промокода (требуется подписка)
+- Меню с навигацией по разделам
+
+**Админам:**
+- Добавление промокодов (одиночное/массовое)
+- Удаление промокодов
+- Просмотр статистики
+- Рассылки с фото
+
+## Логика работы с промокодами
+
+- При удалении промокода из БД запись в `promo_usage` удаляется каскадно (`ON DELETE CASCADE`)
+- Пользователь может получить новый промокод после удаления старого
+- Проверка `has_user_received_any_promo` использует JOIN с таблицей `promos`
+- Истекшие промокоды удаляются автоматически раз в 24 часа
+
+## Настройки
+
+Основные константы в `bot/config.py`:
+- `BROADCAST_COOLDOWN_MINUTES = 2` - кулдаун между рассылками
+- `MESSAGE_DELAY_SECONDS = 0.3` - задержка при broadcast
+- `PROMO_CHECK_INTERVAL_HOURS = 24` - интервал проверки истекших промо
+
+Все тексты сообщений в `bot/constants.py`.

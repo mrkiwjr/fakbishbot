@@ -8,10 +8,11 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     MessageHandler,
-    filters
+    filters,
+    ContextTypes
 )
 
-from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH
+from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
 from bot.services.database import db
 from bot.handlers.menu import (
     menu_start, 
@@ -29,6 +30,9 @@ from bot.handlers.admin import (
     receive_broadcast_photo,
     handle_broadcast_photo_choice,
     confirm_broadcast,
+    receive_admin_id,
+    receive_file_expiry_date,
+    receive_file_expiry_time,
     cancel,
     AWAITING_PROMO_CODE,
     AWAITING_PROMO_DAYS,
@@ -36,6 +40,9 @@ from bot.handlers.admin import (
     AWAITING_BROADCAST_TEXT,
     AWAITING_BROADCAST_PHOTO,
     AWAITING_BROADCAST_CONFIRM,
+    AWAITING_ADMIN_ID,
+    AWAITING_FILE_EXPIRY_DATE,
+    AWAITING_FILE_EXPIRY_TIME,
     ADMIN_MAIN
 )
 
@@ -74,10 +81,37 @@ async def setup_bot_commands(application: Application):
     await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 
+async def cleanup_expired_promos(context: ContextTypes.DEFAULT_TYPE):
+    """Фоновая задача для автоматической очистки истекших промокодов"""
+    logger = logging.getLogger(__name__)
+    try:
+        deleted_count = await db.delete_expired_promos()
+        if deleted_count > 0:
+            logger.info(f"Удалено истекших промокодов: {deleted_count}")
+        else:
+            logger.debug("Истекших промокодов для удаления не найдено")
+    except Exception as e:
+        logger.error(f"Ошибка при очистке истекших промокодов: {e}")
+
+
 async def init_application(application: Application):
     """Инициализация приложения"""
+    logger = logging.getLogger(__name__)
+
     await db.init_db()
     await setup_bot_commands(application)
+
+    job_queue = application.job_queue
+    if job_queue:
+        job_queue.run_repeating(
+            cleanup_expired_promos,
+            interval=PROMO_CHECK_INTERVAL_HOURS * 3600,
+            first=10
+        )
+        logger.info(f"Запланирована автоматическая очистка промокодов каждые {PROMO_CHECK_INTERVAL_HOURS}ч")
+
+        await cleanup_expired_promos(None)
+        logger.info("Выполнена первичная очистка истекших промокодов")
 
 
 def setup_handlers(application: Application):
@@ -87,8 +121,8 @@ def setup_handlers(application: Application):
     admin_conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(
-                button_callback, 
-                pattern="^(admin_main|add_promo|list_promos|stats|broadcast_menu|delete_promo_menu|upload_promo_file|delete_.*|cancel)$"
+                button_callback,
+                pattern="^(admin_main|add_promo|list_promos|promo_history|stats|broadcast_menu|delete_promo_menu|upload_promo_file|delete_.*|manage_admins|add_admin|remove_admin_menu|remove_admin_.*|cancel)$"
             )
         ],
         states={
@@ -104,6 +138,14 @@ def setup_handlers(application: Application):
                 MessageHandler(filters.Document.ALL, receive_promo_file),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
+            AWAITING_FILE_EXPIRY_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_file_expiry_date),
+                CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
+            ],
+            AWAITING_FILE_EXPIRY_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_file_expiry_time),
+                CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
+            ],
             AWAITING_BROADCAST_TEXT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_broadcast_text),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
@@ -117,6 +159,10 @@ def setup_handlers(application: Application):
                 CallbackQueryHandler(confirm_broadcast, pattern="^broadcast_confirm$"),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
+            AWAITING_ADMIN_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_admin_id),
+                CallbackQueryHandler(button_callback, pattern="^manage_admins$")
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
@@ -126,18 +172,18 @@ def setup_handlers(application: Application):
     application.add_handler(CommandHandler("start", menu_start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_panel))
-    
-    # Обработчики callback запросов
+
+    # ConversationHandler для администратора (ПЕРВЫМ среди callback handlers)
+    application.add_handler(admin_conv_handler)
+
+    # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
-    
+
     # Обработчики сообщений
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
         handle_book_pc_message
     ))
-    
-    # ConversationHandler для администратора (добавляется последним)
-    application.add_handler(admin_conv_handler)
 
 
 def main():

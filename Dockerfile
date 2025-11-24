@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p data
+RUN mkdir -p data && \
+    mkdir -p bot/media/menu
 
 CMD ["python", "main.py"]

@@ -41,8 +41,18 @@ class Database:
                     promo_code TEXT NOT NULL,
                     received_at TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(user_id),
-                    FOREIGN KEY (promo_code) REFERENCES promos(code),
+                    FOREIGN KEY (promo_code) REFERENCES promos(code) ON DELETE CASCADE,
                     UNIQUE(user_id, promo_code)
+                )
+            """)
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS admins (
+                    user_id INTEGER PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    username TEXT,
+                    added_at TEXT NOT NULL,
+                    added_by INTEGER NOT NULL
                 )
             """)
 
@@ -50,7 +60,51 @@ class Database:
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_active ON promos(active)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON promo_usage(user_id)")
 
+            await self._migrate_promo_usage_table(conn)
+
             await conn.commit()
+
+    async def _migrate_promo_usage_table(self, conn):
+        cursor = await conn.execute("PRAGMA table_info(promo_usage)")
+        columns = await cursor.fetchall()
+
+        if not columns:
+            return
+
+        cursor = await conn.execute("PRAGMA foreign_key_list(promo_usage)")
+        foreign_keys = await cursor.fetchall()
+
+        has_promo_fk = any(fk[3] == 'promos' for fk in foreign_keys)
+
+        if has_promo_fk:
+            return
+
+        await conn.execute("PRAGMA foreign_keys=OFF")
+
+        await conn.execute("""
+            CREATE TABLE promo_usage_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                promo_code TEXT NOT NULL,
+                received_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                FOREIGN KEY (promo_code) REFERENCES promos(code) ON DELETE CASCADE,
+                UNIQUE(user_id, promo_code)
+            )
+        """)
+
+        await conn.execute("""
+            INSERT INTO promo_usage_new (id, user_id, promo_code, received_at)
+            SELECT id, user_id, promo_code, received_at
+            FROM promo_usage
+        """)
+
+        await conn.execute("DROP TABLE promo_usage")
+        await conn.execute("ALTER TABLE promo_usage_new RENAME TO promo_usage")
+
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON promo_usage(user_id)")
+
+        await conn.execute("PRAGMA foreign_keys=ON")
 
     async def add_user(self, user_id: int, first_name: str, username: Optional[str] = None) -> bool:
         async with aiosqlite.connect(self.db_path) as conn:
@@ -69,6 +123,15 @@ class Database:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
                 "SELECT * FROM users WHERE user_id = ?", (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_user_by_username(self, username: str) -> Optional[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM users WHERE username = ?", (username,)
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
@@ -157,20 +220,20 @@ class Database:
 
     # ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ НОВОГО ФУНКЦИОНАЛА
 
-    async def check_promo_usage_this_week(self, user_id: int) -> bool:
-        """Проверить получал ли пользователь промокод на этой неделе"""
+    async def has_user_received_any_promo(self, user_id: int) -> bool:
+        """Проверить получал ли пользователь активный промокод"""
         async with aiosqlite.connect(self.db_path) as conn:
             async with conn.execute("""
-                SELECT 1 FROM promo_usage 
-                WHERE user_id = ? AND date(received_at) >= date('now', 'weekday 0', '-7 days')
-                ORDER BY received_at DESC 
+                SELECT 1 FROM promo_usage pu
+                JOIN promos p ON pu.promo_code = p.code
+                WHERE pu.user_id = ?
                 LIMIT 1
             """, (user_id,)) as cursor:
                 result = await cursor.fetchone()
                 return result is not None
 
     async def get_last_user_promo(self, user_id: int) -> Optional[dict]:
-        """Получить последний полученный промокод пользователя"""
+        """Получить последний активный промокод пользователя"""
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("""
@@ -178,7 +241,7 @@ class Database:
                 FROM promo_usage pu
                 JOIN promos p ON pu.promo_code = p.code
                 WHERE pu.user_id = ?
-                ORDER BY pu.received_at DESC 
+                ORDER BY pu.received_at DESC
                 LIMIT 1
             """, (user_id,)) as cursor:
                 result = await cursor.fetchone()
@@ -190,12 +253,102 @@ class Database:
                     }
                 return None
 
+    async def get_unused_active_promos(self) -> list[dict]:
+        """Получить список активных неиспользованных промокодов"""
+        now = datetime.now().strftime("%Y-%m-%d")
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("""
+                SELECT p.code, p.expiry_date, p.created_at
+                FROM promos p
+                LEFT JOIN promo_usage pu ON p.code = pu.promo_code
+                WHERE p.active = 1
+                  AND p.expiry_date >= ?
+                  AND pu.promo_code IS NULL
+                ORDER BY p.created_at DESC
+            """, (now,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_promo_usage_with_users(self) -> list[dict]:
+        """Получить историю использования промокодов с информацией о пользователях"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("""
+                SELECT
+                    pu.promo_code,
+                    pu.user_id,
+                    u.first_name,
+                    u.username,
+                    pu.received_at,
+                    p.expiry_date
+                FROM promo_usage pu
+                JOIN users u ON pu.user_id = u.user_id
+                JOIN promos p ON pu.promo_code = p.code
+                ORDER BY pu.received_at DESC
+            """) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
     async def execute(self, query: str, params: tuple = ()):
         """Универсальный метод для выполнения SQL запросов"""
         async with aiosqlite.connect(self.db_path) as conn:
             cursor = await conn.execute(query, params)
             await conn.commit()
             return cursor
+
+    async def add_admin(self, user_id: int, first_name: str, added_by: int, username: Optional[str] = None) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO admins (user_id, first_name, username, added_at, added_by) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, first_name, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), added_by)
+                )
+                await conn.commit()
+                return True
+            except aiosqlite.IntegrityError:
+                return False
+
+    async def remove_admin(self, user_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+            await conn.commit()
+            return conn.total_changes > 0
+
+    async def is_admin(self, user_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            async with conn.execute(
+                "SELECT 1 FROM admins WHERE user_id = ?", (user_id,)
+            ) as cursor:
+                result = await cursor.fetchone()
+                return result is not None
+
+    async def get_all_admins(self) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("SELECT * FROM admins ORDER BY added_at DESC") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_admin(self, user_id: int) -> Optional[dict]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM admins WHERE user_id = ?", (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def delete_expired_promos(self) -> int:
+        """Удаляет истекшие промокоды из БД"""
+        now = datetime.now().strftime("%Y-%m-%d")
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(
+                "DELETE FROM promos WHERE expiry_date < ?",
+                (now,)
+            )
+            await conn.commit()
+            return cursor.rowcount
 
 
 db = Database()

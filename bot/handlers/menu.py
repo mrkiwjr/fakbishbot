@@ -1,8 +1,10 @@
+import os
+import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 
-from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID
+from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID, MENU_PHOTOS
 from bot.constants import (
     MENU_MAIN,
     NOT_SUBSCRIBED_MESSAGE,
@@ -19,14 +21,158 @@ from bot.constants import (
 from bot.services.database import db
 from bot.services.subscription import check_subscription
 from bot.services.promo import promo_service
+from bot.services.photo_cache import photo_cache
 from bot.middleware.message_cleanup import message_cleanup
 
-import os
+logger = logging.getLogger(__name__)
 
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
 
-# Путь к фото
-PHOTO_PATH = os.path.join(os.path.dirname(__file__), '..', 'media', 'katana.jpg')
+async def send_text_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    edit: bool = False,
+    photo_key: str = None
+):
+    if photo_key:
+        photo_path = MENU_PHOTOS.get(photo_key)
+        if photo_path and os.path.exists(photo_path):
+            is_valid, _ = photo_cache.validate_photo(photo_path)
+            if is_valid:
+                try:
+                    cached_file_id = photo_cache.get_file_id(photo_key, photo_path)
+
+                    if cached_file_id:
+                        response = await update.effective_chat.send_photo(
+                            photo=cached_file_id,
+                            caption=text,
+                            reply_markup=reply_markup
+                        )
+                    else:
+                        with open(photo_path, 'rb') as photo_file:
+                            response = await update.effective_chat.send_photo(
+                                photo=InputFile(photo_file),
+                                caption=text,
+                                reply_markup=reply_markup
+                            )
+
+                        if response.photo:
+                            new_file_id = response.photo[-1].file_id
+                            photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+
+                    await message_cleanup.track_bot_message(
+                        update.effective_chat.id,
+                        response.message_id,
+                        context
+                    )
+                    return response
+                except Exception as e:
+                    logger.warning(f"Ошибка отправки фото для {photo_key}: {e}")
+
+    response = await update.effective_chat.send_message(
+        text=text,
+        reply_markup=reply_markup
+    )
+
+    await message_cleanup.track_bot_message(
+        update.effective_chat.id,
+        response.message_id,
+        context
+    )
+    return response
+
+async def send_menu_with_photo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    photo_key: str,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    edit: bool = False,
+    parse_mode: str = None
+):
+    photo_path = MENU_PHOTOS.get(photo_key)
+
+    async def send_text_fallback():
+        response = await update.effective_chat.send_message(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+        await message_cleanup.track_bot_message(
+            update.effective_chat.id,
+            response.message_id,
+            context
+        )
+        return response
+
+    if not photo_path or not os.path.exists(photo_path):
+        logger.debug(f"Фото для {photo_key} не найдено, отправка текстового меню")
+        return await send_text_fallback()
+
+    is_valid, error_msg = photo_cache.validate_photo(photo_path)
+    if not is_valid:
+        logger.warning(f"Фото {photo_key} не прошло валидацию: {error_msg}")
+        return await send_text_fallback()
+
+    try:
+        cached_file_id = photo_cache.get_file_id(photo_key, photo_path)
+
+        if cached_file_id:
+            try:
+                response = await update.effective_chat.send_photo(
+                    photo=cached_file_id,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                logger.debug(f"Отправлено фото {photo_key} через кешированный file_id")
+            except Exception as cache_error:
+                logger.warning(f"Ошибка использования кешированного file_id для {photo_key}: {cache_error}")
+                with open(photo_path, 'rb') as photo_file:
+                    response = await update.effective_chat.send_photo(
+                        photo=InputFile(photo_file),
+                        caption=text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode
+                    )
+
+                if response.photo:
+                    new_file_id = response.photo[-1].file_id
+                    photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+        else:
+            with open(photo_path, 'rb') as photo_file:
+                response = await update.effective_chat.send_photo(
+                    photo=InputFile(photo_file),
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+
+            if response.photo:
+                new_file_id = response.photo[-1].file_id
+                photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+                logger.info(f"Отправлено и кешировано фото {photo_key}")
+
+        await message_cleanup.track_bot_message(
+            update.effective_chat.id,
+            response.message_id,
+            context
+        )
+        return response
+
+    except BadRequest as e:
+        error_message = str(e).lower()
+        if "image_process_failed" in error_message:
+            logger.warning(f"Telegram не смог обработать изображение {photo_key}, отправка текстового меню")
+        else:
+            logger.error(f"Ошибка BadRequest при отправке меню с фото {photo_key}: {e}")
+        return await send_text_fallback()
+
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при отправке меню с фото {photo_key}: {e}")
+        return await send_text_fallback()
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
     keyboard = [
@@ -44,65 +190,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    try:
-        # Пытаемся отправить фото с меню
-        if os.path.exists(PHOTO_PATH):
-            if edit:
-                query = update.callback_query
-                # Для редактирования сначала удаляем старое сообщение и отправляем новое с фото
-                await query.delete_message()
-                response = await update.effective_chat.send_photo(
-                    photo=InputFile(PHOTO_PATH),
-                    caption=MENU_MAIN,
-                    reply_markup=reply_markup
-                )
-            else:
-                response = await update.effective_chat.send_photo(
-                    photo=InputFile(PHOTO_PATH),
-                    caption=MENU_MAIN,
-                    reply_markup=reply_markup
-                )
-        else:
-            # Если фото не найдено, отправляем текстовое сообщение
-            if edit:
-                query = update.callback_query
-                await query.edit_message_text(
-                    text=MENU_MAIN,
-                    reply_markup=reply_markup
-                )
-                response = query.message
-            else:
-                response = await update.message.reply_text(
-                    text=MENU_MAIN,
-                    reply_markup=reply_markup
-                )
-        
-        await message_cleanup.track_bot_message(
-            update.effective_chat.id,
-            response.message_id,
-            context
-        )
-        
-    except Exception as e:
-        print(f"Ошибка при отправке меню: {e}")
-        # Fallback на текстовое меню
-        if edit:
-            query = update.callback_query
-            await query.edit_message_text(
-                text=MENU_MAIN,
-                reply_markup=reply_markup
-            )
-            await message_cleanup.track_bot_message(
-                update.effective_chat.id,
-                query.message.message_id,
-                context
-            )
-        else:
-            await update.message.reply_text(
-                text=MENU_MAIN,
-                reply_markup=reply_markup
-            )
+    await send_menu_with_photo(update, context, "main", MENU_MAIN, reply_markup, edit=edit)
 
 
 async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,39 +220,7 @@ async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    try:
-        # Пытаемся отправить фото с меню
-        if os.path.exists(PHOTO_PATH):
-            response = await update.effective_chat.send_photo(
-                photo=InputFile(PHOTO_PATH),
-                caption=MENU_MAIN,
-                reply_markup=reply_markup
-            )
-        else:
-            # Если фото не найдено, отправляем текстовое сообщение
-            response = await update.effective_chat.send_message(
-                text=MENU_MAIN,
-                reply_markup=reply_markup
-            )
-        
-        await message_cleanup.track_bot_message(
-            update.effective_chat.id,
-            response.message_id,
-            context
-        )
-        
-    except Exception as e:
-        print(f"Ошибка при отправке стартового сообщения: {e}")
-        # Fallback на текстовое сообщение
-        response = await update.effective_chat.send_message(
-            text=MENU_MAIN,
-            reply_markup=reply_markup
-        )
-        await message_cleanup.track_bot_message(
-            update.effective_chat.id,
-            response.message_id,
-            context
-        )
+    await send_menu_with_photo(update, context, "main", MENU_MAIN, reply_markup)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,9 +286,13 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(
-            text=NOT_SUBSCRIBED_MESSAGE.format(channel=CHANNEL_USERNAME),
-            reply_markup=reply_markup
+        await send_text_message(
+            update,
+            context,
+            NOT_SUBSCRIBED_MESSAGE.format(channel=CHANNEL_USERNAME),
+            reply_markup,
+            edit=True,
+            photo_key="promo"
         )
         return
 
@@ -243,36 +303,57 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if reason == "no_promo":
-            await query.edit_message_text(
-                text=NO_ACTIVE_PROMO_MESSAGE,
-                reply_markup=reply_markup
+            await send_text_message(
+                update,
+                context,
+                NO_ACTIVE_PROMO_MESSAGE,
+                reply_markup,
+                edit=True,
+                photo_key="promo"
             )
         elif reason == "already_received":
-            current_promo = await promo_service.get_current_promo()
-            await query.edit_message_text(
-                text=PROMO_ALREADY_RECEIVED_MESSAGE.format(
-                    next_available=current_promo["expiry_date"]
-                ),
-                reply_markup=reply_markup
-            )
+            last_promo = await promo_service.get_last_received_promo(user_id)
+            if last_promo:
+                await send_text_message(
+                    update,
+                    context,
+                    PROMO_ALREADY_RECEIVED_MESSAGE.format(
+                        code=last_promo["code"],
+                        expiry_date=last_promo["expiry_date"]
+                    ),
+                    reply_markup,
+                    edit=True,
+                    photo_key="promo"
+                )
+            else:
+                await send_text_message(
+                    update,
+                    context,
+                    "Вы уже получили промокод на этой неделе.",
+                    reply_markup,
+                    edit=True,
+                    photo_key="promo"
+                )
         return
 
-    # ИЗМЕНЕНИЕ: получаем случайный промокод вместо фиксированного
     received_promo = await promo_service.get_random_active_promo()
-    
+
     if received_promo:
-        # Отмечаем что пользователь получил промокод
         await promo_service.mark_promo_received(user_id, received_promo["code"])
-        
+
         keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=str(MAIN))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(
-            text=PROMO_RECEIVED_MESSAGE.format(
+        await send_text_message(
+            update,
+            context,
+            PROMO_RECEIVED_MESSAGE.format(
                 code=received_promo["code"],
                 expiry_date=received_promo["expiry_date"]
             ),
-            reply_markup=reply_markup
+            reply_markup,
+            edit=True,
+            photo_key="promo"
         )
 
 
@@ -288,10 +369,7 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = HELP_USER_MESSAGE
 
-    await query.edit_message_text(
-        text=text,
-        reply_markup=reply_markup
-    )
+    await send_menu_with_photo(update, context, "help", text, reply_markup, edit=True)
 
 
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -300,11 +378,7 @@ async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        text=BOOK_PC_MESSAGE,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
+    await send_menu_with_photo(update, context, "book_pc", BOOK_PC_MESSAGE, reply_markup, edit=True, parse_mode='Markdown')
 
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -313,10 +387,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        text=FEEDBACK_MESSAGE,
-        reply_markup=reply_markup
-    )
+    await send_menu_with_photo(update, context, "feedback", FEEDBACK_MESSAGE, reply_markup, edit=True)
 
 
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -325,10 +396,7 @@ async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        text=PROMOTIONS_MESSAGE,
-        reply_markup=reply_markup
-    )
+    await send_menu_with_photo(update, context, "promotions", PROMOTIONS_MESSAGE, reply_markup, edit=True)
 
 
 async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,10 +405,7 @@ async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        text=TARIFFS_MESSAGE,
-        reply_markup=reply_markup
-    )
+    await send_menu_with_photo(update, context, "tariffs", TARIFFS_MESSAGE, reply_markup, edit=True)
 
 
 async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -375,7 +440,7 @@ async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         
     except Exception as e:
-        print(f"Ошибка отправки уведомления: {e}")
+        logger.error(f"Ошибка отправки уведомления в группу {NOTIFICATION_CHAT_ID}: {e}")
         await update.message.reply_text(
             "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
         )
@@ -398,9 +463,13 @@ async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            await query.edit_message_text(
-                text=NOT_SUBSCRIBED_MESSAGE.format(channel=CHANNEL_USERNAME),
-                reply_markup=reply_markup
+            await send_text_message(
+                update,
+                context,
+                NOT_SUBSCRIBED_MESSAGE.format(channel=CHANNEL_USERNAME),
+                reply_markup,
+                edit=True,
+                photo_key="promo"
             )
         except BadRequest as e:
             if "message is not modified" not in str(e).lower():

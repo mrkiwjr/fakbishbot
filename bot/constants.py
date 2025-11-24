@@ -17,8 +17,8 @@ PROMO_RECEIVED_MESSAGE: Final[str] = (
 )
 
 PROMO_ALREADY_RECEIVED_MESSAGE: Final[str] = (
-    "Вы уже получили промокод на этой неделе.\n"
-    "Следующий промокод будет доступен: {next_available}"
+    "Ваш промокод: {code}\n\n"
+    "Срок действия: до {expiry_date}"
 )
 
 NO_ACTIVE_PROMO_MESSAGE: Final[str] = (
