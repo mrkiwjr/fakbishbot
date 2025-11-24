@@ -1,7 +1,7 @@
 import os
 import aiosqlite
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict
 
 from bot.config import DATABASE_PATH
 
@@ -107,6 +107,8 @@ class Database:
         await conn.execute("PRAGMA foreign_keys=ON")
 
     async def add_user(self, user_id: int, first_name: str, username: Optional[str] = None) -> bool:
+        # Нормализуем username в нижний регистр
+        username = username.lower() if username else None
         async with aiosqlite.connect(self.db_path) as conn:
             try:
                 await conn.execute(
@@ -128,20 +130,26 @@ class Database:
                 return dict(row) if row else None
 
     async def get_user_by_username(self, username: str) -> Optional[dict]:
+        # Регистронезависимый поиск
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
-                "SELECT * FROM users WHERE username = ?", (username,)
+                "SELECT * FROM users WHERE LOWER(username) = LOWER(?)", (username,)
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
-    async def get_user_by_id(user_id: int):
-        query = "SELECT * FROM users WHERE user_id = $1"
-        row = await database.fetchrow(query, user_id)
-        return dict(row) if row else None
+    async def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        # Теперь правильно используем aiosqlite
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT * FROM users WHERE user_id = ?", (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
-    async def get_all_users(self) -> list[dict]:
+    async def get_all_users(self) -> List[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("SELECT * FROM users") as cursor:
@@ -166,7 +174,7 @@ class Database:
             except aiosqlite.IntegrityError:
                 return False
 
-    async def get_active_promos(self) -> list[dict]:
+    async def get_active_promos(self) -> List[dict]:
         now = datetime.now().strftime("%Y-%m-%d")
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
@@ -177,7 +185,7 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def get_all_promos(self) -> list[dict]:
+    async def get_all_promos(self) -> List[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("SELECT * FROM promos ORDER BY created_at DESC") as cursor:
@@ -213,7 +221,7 @@ class Database:
                 result = await cursor.fetchone()
                 return result is not None
 
-    async def get_user_promo_history(self, user_id: int) -> list[dict]:
+    async def get_user_promo_history(self, user_id: int) -> List[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
@@ -226,7 +234,6 @@ class Database:
     # ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ НОВОГО ФУНКЦИОНАЛА
 
     async def has_user_received_any_promo(self, user_id: int) -> bool:
-        """Проверить получал ли пользователь активный промокод"""
         async with aiosqlite.connect(self.db_path) as conn:
             async with conn.execute("""
                 SELECT 1 FROM promo_usage pu
@@ -238,7 +245,6 @@ class Database:
                 return result is not None
 
     async def get_last_user_promo(self, user_id: int) -> Optional[dict]:
-        """Получить последний активный промокод пользователя"""
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("""
@@ -258,8 +264,7 @@ class Database:
                     }
                 return None
 
-    async def get_unused_active_promos(self) -> list[dict]:
-        """Получить список активных неиспользованных промокодов"""
+    async def get_unused_active_promos(self) -> List[dict]:
         now = datetime.now().strftime("%Y-%m-%d")
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
@@ -275,8 +280,7 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def get_promo_usage_with_users(self) -> list[dict]:
-        """Получить историю использования промокодов с информацией о пользователях"""
+    async def get_promo_usage_with_users(self) -> List[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("""
@@ -295,14 +299,15 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def execute(self, query: str, params: tuple = ()):
-        """Универсальный метод для выполнения SQL запросов"""
+    async def execute(self, query: str, params: tuple = ()) -> aiosqlite.Cursor:
         async with aiosqlite.connect(self.db_path) as conn:
             cursor = await conn.execute(query, params)
             await conn.commit()
             return cursor
 
     async def add_admin(self, user_id: int, first_name: str, added_by: int, username: Optional[str] = None) -> bool:
+        # Нормализуем username
+        username = username.lower() if username else None
         async with aiosqlite.connect(self.db_path) as conn:
             try:
                 await conn.execute(
@@ -328,7 +333,7 @@ class Database:
                 result = await cursor.fetchone()
                 return result is not None
 
-    async def get_all_admins(self) -> list[dict]:
+    async def get_all_admins(self) -> List[dict]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("SELECT * FROM admins ORDER BY added_at DESC") as cursor:
@@ -345,7 +350,6 @@ class Database:
                 return dict(row) if row else None
 
     async def delete_expired_promos(self) -> int:
-        """Удаляет истекшие промокоды из БД"""
         now = datetime.now().strftime("%Y-%m-%d")
         async with aiosqlite.connect(self.db_path) as conn:
             cursor = await conn.execute(
@@ -356,4 +360,5 @@ class Database:
             return cursor.rowcount
 
 
+# Создаём экземпляр базы данных
 db = Database()
