@@ -13,12 +13,18 @@ from telegram.ext import (
 
 from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH
 from bot.services.database import db
-from bot.handlers.menu import menu_start, menu_callback, help_command, handle_book_pc_message
+from bot.handlers.menu import (
+    menu_start, 
+    menu_callback, 
+    help_command, 
+    handle_book_pc_message
+)
 from bot.handlers.admin import (
     admin_panel,
     button_callback,
     receive_promo_code,
     receive_promo_days,
+    receive_promo_file,
     receive_broadcast_text,
     receive_broadcast_photo,
     handle_broadcast_photo_choice,
@@ -26,6 +32,7 @@ from bot.handlers.admin import (
     cancel,
     AWAITING_PROMO_CODE,
     AWAITING_PROMO_DAYS,
+    AWAITING_PROMO_FILE,
     AWAITING_BROADCAST_TEXT,
     AWAITING_BROADCAST_PHOTO,
     AWAITING_BROADCAST_CONFIRM,
@@ -34,6 +41,7 @@ from bot.handlers.admin import (
 
 
 def setup_logging():
+    """Настройка логирования"""
     os.makedirs(os.path.dirname(LOGS_PATH), exist_ok=True)
 
     logging.basicConfig(
@@ -47,6 +55,7 @@ def setup_logging():
 
 
 async def setup_bot_commands(application: Application):
+    """Настройка команд бота"""
     user_commands = [
         BotCommand("start", "Начать работу с ботом"),
         BotCommand("help", "Показать справку"),
@@ -58,32 +67,30 @@ async def setup_bot_commands(application: Application):
         BotCommand("help", "Показать справку"),
     ]
 
+    # Устанавливаем команды для всех пользователей
     await application.bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
 
+    # Устанавливаем специальные команды для администратора
     await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 
 async def init_application(application: Application):
+    """Инициализация приложения"""
     await db.init_db()
     await setup_bot_commands(application)
 
 
-def main():
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN не установлен в .env файле")
-
-    if ADMIN_ID == 0:
-        raise ValueError("ADMIN_ID не установлен в .env файле")
-
-    setup_logging()
-    logger = logging.getLogger(__name__)
-
-    logger.info("Запуск бота...")
-
-    application = Application.builder().token(BOT_TOKEN).post_init(init_application).build()
-
+def setup_handlers(application: Application):
+    """Настройка всех обработчиков"""
+    
+    # ConversationHandler для администратора
     admin_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^(admin_main|add_promo|list_promos|stats|broadcast_menu|delete_promo_menu|delete_.*|cancel)$")],
+        entry_points=[
+            CallbackQueryHandler(
+                button_callback, 
+                pattern="^(admin_main|add_promo|list_promos|stats|broadcast_menu|delete_promo_menu|upload_promo_file|delete_.*|cancel)$"
+            )
+        ],
         states={
             AWAITING_PROMO_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_promo_code),
@@ -91,6 +98,10 @@ def main():
             ],
             AWAITING_PROMO_DAYS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_promo_days),
+                CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
+            ],
+            AWAITING_PROMO_FILE: [
+                MessageHandler(filters.Document.ALL, receive_promo_file),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
             AWAITING_BROADCAST_TEXT: [
@@ -111,20 +122,55 @@ def main():
         allow_reentry=True
     )
 
+    # Основные обработчики команд
     application.add_handler(CommandHandler("start", menu_start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_panel))
-    application.add_handler(admin_conv_handler)
+    
+    # Обработчики callback запросов
     application.add_handler(CallbackQueryHandler(menu_callback))
     
-    # ДОБАВЛЯЕМ ЭТУ СТРОКУ - обработчик текстовых сообщений для бронирования
+    # Обработчики сообщений
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
         handle_book_pc_message
     ))
+    
+    # ConversationHandler для администратора (добавляется последним)
+    application.add_handler(admin_conv_handler)
 
-    logger.info("Бот запущен успешно")
-    application.run_polling(allowed_updates=["message", "callback_query"])
+
+def main():
+    """Основная функция запуска бота"""
+    # Проверка обязательных переменных окружения
+    if not BOT_TOKEN:
+        raise ValueError("BOT_TOKEN не установлен в .env файле")
+
+    if ADMIN_ID == 0:
+        raise ValueError("ADMIN_ID не установлен в .env файле")
+
+    # Настройка логирования
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Запуск бота...")
+
+    try:
+        # Создание приложения
+        application = Application.builder().token(BOT_TOKEN).post_init(init_application).build()
+
+        # Настройка обработчиков
+        setup_handlers(application)
+
+        # Запуск бота
+        logger.info("Бот запущен успешно")
+        application.run_polling(
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
+        raise
 
 
 if __name__ == "__main__":
