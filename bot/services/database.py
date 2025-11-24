@@ -154,6 +154,28 @@ class Database:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+            
+    async def get_active_promos(self) -> list[dict]:
+        """Получить все активные промокоды"""
+        query = """
+        SELECT code, expiry_date, created_at, active 
+        FROM promocodes 
+        WHERE active = TRUE AND expiry_date > date('now')
+        ORDER BY created_at DESC
+        """
+    
+        async with self.execute(query) as cursor:
+            rows = await cursor.fetchall()
+        
+        return [
+            {
+                "code": row[0],
+                "expiry_date": row[1],
+                "created_at": row[2],
+                "active": bool(row[3])
+            }
+            for row in rows
+    ]
 
 
 db = Database()

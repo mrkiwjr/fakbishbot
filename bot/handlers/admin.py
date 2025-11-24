@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
@@ -8,9 +9,11 @@ from bot.services.database import db
 from bot.services.promo import promo_service
 from bot.middleware.message_cleanup import message_cleanup
 
-AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM = range(5)
+AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE = range(6)
 ADMIN_MAIN = "admin_main"
 
+PROMO_FILES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'promo_files')
+os.makedirs(PROMO_FILES_DIR, exist_ok=True)
 
 def admin_required(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -76,6 +79,74 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context
     )
 
+async def receive_promo_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка загруженного файла с промокодами"""
+    message_id = context.user_data.get("admin_message_id")
+    
+    if not update.message.document:
+        await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл.")
+        return AWAITING_PROMO_FILE
+    
+    document = update.message.document
+    file_extension = document.file_name.split('.')[-1].lower() if document.file_name else ''
+    
+    if file_extension not in ['txt', 'text']:
+        await update.message.reply_text("❌ Пожалуйста, отправьте текстовый файл (.txt)")
+        return AWAITING_PROMO_FILE
+    
+    try:
+        # Скачиваем файл
+        file = await document.get_file()
+        file_path = os.path.join(PROMO_FILES_DIR, f"promo_{document.file_name}")
+        await file.download_to_drive(file_path)
+        
+        # Читаем промокоды из файла
+        with open(file_path, 'r', encoding='utf-8') as f:
+            promo_codes = [line.strip() for line in f if line.strip()]
+        
+        if not promo_codes:
+            await update.message.reply_text("❌ Файл пуст или содержит только пустые строки")
+            return AWAITING_PROMO_FILE
+        
+        # Сохраняем промокоды в базу
+        added_count = 0
+        days = 7  # По умолчанию 7 дней
+        
+        for code in promo_codes:
+            if code and len(code) > 0 and await promo_service.create_promo(code, days):
+                added_count += 1
+        
+        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ *Файл успешно обработан!*\n\n"
+            f"📁 Файл: `{document.file_name}`\n"
+            f"🎫 Промокодов в файле: `{len(promo_codes)}`\n"
+            f"✅ Добавлено в базу: `{added_count}`\n"
+            f"📅 Срок действия: `{days}` дней",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        
+        # Удаляем служебные сообщения
+        await update.message.delete()
+        if message_id:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=message_id
+                )
+            except Exception:
+                pass
+        
+        context.user_data.clear()
+        return ConversationHandler.END
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при обработке файла: `{str(e)}`", parse_mode='Markdown')
+        return AWAITING_PROMO_FILE
+    
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
