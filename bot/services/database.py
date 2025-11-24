@@ -154,28 +154,48 @@ class Database:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-            
-    async def get_active_promos(self) -> list[dict]:
-        """Получить все активные промокоды"""
-        query = """
-        SELECT code, expiry_date, created_at, active 
-        FROM promocodes 
-        WHERE active = TRUE AND expiry_date > date('now')
-        ORDER BY created_at DESC
-        """
-    
-        async with self.execute(query) as cursor:
-            rows = await cursor.fetchall()
-        
-        return [
-            {
-                "code": row[0],
-                "expiry_date": row[1],
-                "created_at": row[2],
-                "active": bool(row[3])
-            }
-            for row in rows
-    ]
+
+    # ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ НОВОГО ФУНКЦИОНАЛА
+
+    async def check_promo_usage_this_week(self, user_id: int) -> bool:
+        """Проверить получал ли пользователь промокод на этой неделе"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            async with conn.execute("""
+                SELECT 1 FROM promo_usage 
+                WHERE user_id = ? AND date(received_at) >= date('now', 'weekday 0', '-7 days')
+                ORDER BY received_at DESC 
+                LIMIT 1
+            """, (user_id,)) as cursor:
+                result = await cursor.fetchone()
+                return result is not None
+
+    async def get_last_user_promo(self, user_id: int) -> Optional[dict]:
+        """Получить последний полученный промокод пользователя"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("""
+                SELECT pu.promo_code, pu.received_at, p.expiry_date
+                FROM promo_usage pu
+                JOIN promos p ON pu.promo_code = p.code
+                WHERE pu.user_id = ?
+                ORDER BY pu.received_at DESC 
+                LIMIT 1
+            """, (user_id,)) as cursor:
+                result = await cursor.fetchone()
+                if result:
+                    return {
+                        "code": result["promo_code"],
+                        "received_at": result["received_at"],
+                        "expiry_date": result["expiry_date"]
+                    }
+                return None
+
+    async def execute(self, query: str, params: tuple = ()):
+        """Универсальный метод для выполнения SQL запросов"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cursor = await conn.execute(query, params)
+            await conn.commit()
+            return cursor
 
 
 db = Database()
