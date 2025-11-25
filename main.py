@@ -22,7 +22,8 @@ from bot.handlers.menu import (
     cancel_feedback,
     menu_callback, 
     help_command, 
-    handle_book_pc_message
+    handle_book_pc_message,
+    FEEDBACK
 )
 from bot.handlers.admin import (
     admin_panel,
