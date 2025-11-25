@@ -54,7 +54,6 @@ HELP_ADMIN_MESSAGE: Final[str] = (
 )
 
 MENU_MAIN: Final[str] = (
-
 )
 
 MENU_PROMO: Final[str] = (
