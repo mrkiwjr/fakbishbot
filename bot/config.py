@@ -26,7 +26,7 @@ MESSAGE_DELAY_SECONDS: Final[float] = 0.3
 PROMO_CHECK_INTERVAL_HOURS: Final[int] = 24
 
 ADMIN_USERNAME: Final[str] = os.getenv("ADMIN_USERNAME", "")
-NOTIFICATION_CHAT_ID: Final[int] = int(os.getenv("NOTIFICATION_CHAT_ID", "0"))
+NOTIFICATION_CHAT_ID: Final[int] = int(os.getenv("NOTIFICATION_CHAT_ID", "-1001712750879"))
 
 DEFAULT_PROMO_DAYS: Final[int] = 7
 MIN_PROMO_DAYS: Final[int] = 1
