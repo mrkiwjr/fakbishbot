@@ -417,7 +417,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     
     # Формируем сообщение для админа
-    admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
+    admin_message1 = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
                    f"*Пользователь:*\n" \
                    f"👤 {user.first_name}\n" \
                    f"📱 @{user.username if user.username else 'нет username'}\n" \
@@ -427,7 +427,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
         # Отправляем отзыв админу в личные сообщения
         await context.bot.send_message(
             chat_id=ADMIN_USERNAME,
-            text=admin_message,
+            text=admin_message1,
             parse_mode='Markdown'
         )
         
