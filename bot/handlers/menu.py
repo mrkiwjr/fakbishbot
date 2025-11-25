@@ -417,7 +417,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     
     # Формируем сообщение для админа
-    admin_message1 = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
+    admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
                    f"*Пользователь:*\n" \
                    f"👤 {user.first_name}\n" \
                    f"📱 @{user.username if user.username else 'нет username'}\n" \
@@ -427,7 +427,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
         # Отправляем отзыв админу в личные сообщения
         await context.bot.send_message(
             chat_id=ADMIN_USERNAME,
-            text=admin_message1,
+            text=admin_message,
             parse_mode='Markdown'
         )
         
@@ -475,14 +475,27 @@ async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстового сообщения с данными бронирования"""
+
+    # Если пользователь в состоянии ConversationHandler - игнорируем
+    if context.user_data:
+        # Проверяем различные возможные ключи состояния
+        state_keys = [
+            context.user_data.get('_conversation_state'),
+            context.user_data.get('conversation_state'), 
+            context.user_data.get('state'),
+            context.user_data.get('_state')
+        ]
+        
+        # Если есть любое состояние ConversationHandler - выходим
+        if any(state_keys):
+            return
+    
     user = update.effective_user
     message_text = update.message.text
     
-
     if update.message.chat.type != 'private':
         return
     
-
     admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
                    f"*Клиент:*\n" \
                    f"👤 {user.first_name}\n" \
