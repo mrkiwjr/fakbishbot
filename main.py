@@ -172,17 +172,6 @@ def setup_handlers(application: Application):
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
     )
-
-    # Основные обработчики команд
-    application.add_handler(CommandHandler("start", menu_start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("admin", admin_panel))
-
-    # ConversationHandler для администратора (ПЕРВЫМ среди callback handlers)
-    application.add_handler(admin_conv_handler)
-
-    # Обработчики callback запросов для пользовательского меню
-    application.add_handler(CallbackQueryHandler(menu_callback))
     
     feedback_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_leave_feedback, pattern="^leave_feedback$")],
@@ -194,8 +183,19 @@ def setup_handlers(application: Application):
         },
         fallbacks=[CommandHandler("cancel", cancel_feedback)],
         allow_reentry=True
-    )
+    )    
+    
+    # Основные обработчики команд
+    application.add_handler(CommandHandler("start", menu_start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("admin", admin_panel))
 
+    # ConversationHandler для администратора (ПЕРВЫМ среди callback handlers)
+    application.add_handler(admin_conv_handler)
+
+    # Обработчики callback запросов для пользовательского меню
+    application.add_handler(CallbackQueryHandler(menu_callback))
+    
     application.add_handler(feedback_conv_handler)
 
     # Обработчики сообщений
