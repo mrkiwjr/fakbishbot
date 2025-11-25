@@ -7,7 +7,7 @@ promo.jpg       - Раздел промокодов
 book_pc.jpg     - Бронирование ПК
 promotions.jpg  - Акции
 tariffs.jpg     - Тарифы
-feedback.jpg    - Обратная связь
+feedbackph.jpg    - Обратная связь
 help.jpg        - Помощь
 
 ТРЕБОВАНИЯ TELEGRAM BOT API:

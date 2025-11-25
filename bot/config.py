@@ -25,7 +25,7 @@ MESSAGE_DELAY_SECONDS: Final[float] = 0.3
 
 PROMO_CHECK_INTERVAL_HOURS: Final[int] = 24
 
-ADMIN_USERNAME: Final[str] = os.getenv("ADMIN_USERNAME", "")
+ADMIN_USERNAME: Final[str] = os.getenv("ADMIN_USERNAME", "@katana8pro")
 NOTIFICATION_CHAT_ID: Final[int] = int(os.getenv("NOTIFICATION_CHAT_ID", "-1001712750879"))
 
 DEFAULT_PROMO_DAYS: Final[int] = 7
@@ -37,7 +37,7 @@ MENU_PHOTOS_DIR: Final[str] = os.path.join(os.path.dirname(__file__), "media", "
 
 def _init_menu_photos() -> dict[str, Optional[str]]:
     photos = {}
-    for key in ["main", "promo", "book_pc", "promotions", "tariffs", "feedback", "help"]:
+    for key in ["main", "promo", "book_pc", "promotions", "tariffs", "feedbackph", "help"]:
         photos[key] = _find_photo_path(MENU_PHOTOS_DIR, key)
     return photos
 
