@@ -15,7 +15,11 @@ from telegram.ext import (
 from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
 from bot.services.database import db
 from bot.handlers.menu import (
-    menu_start, 
+    menu_start,
+    handle_leave_feedback,
+    AWAITING_FEEDBACK,
+    handle_feedback_text,
+    cancel_feedback,
     menu_callback, 
     help_command, 
     handle_book_pc_message
@@ -178,6 +182,20 @@ def setup_handlers(application: Application):
 
     # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
+    
+    feedback_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(handle_leave_feedback, pattern="^leave_feedback$")],
+        states={
+        AWAITING_FEEDBACK: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback_text),
+            CallbackQueryHandler(cancel_feedback, pattern=f"^{FEEDBACK}$")
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_feedback)],
+        allow_reentry=True
+    )
+
+    application.add_handler(feedback_conv_handler)
 
     # Обработчики сообщений
     application.add_handler(MessageHandler(
