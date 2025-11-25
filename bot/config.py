@@ -11,9 +11,22 @@ def _find_photo_path(base_dir: str, name: str) -> Optional[str]:
             return path
     return None
 
+def get_int_env(key: str, default: Optional[int] = None) -> int:
+    value = os.getenv(key)
+    if value is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Переменная окружения '{key}' не установлена в .env")
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"Переменная '{key}' должна быть целым числом, получено: {value}")
+
+ADMIN_ID: Final[int] = get_int_env("ADMIN_ID")
+NOTIFICATION_CHAT_ID: Final[int] = get_int_env("NOTIFICATION_CHAT_ID")
+CHANNEL_ID: Final[int] = get_int_env("CHANNEL_ID", 0)
+
 BOT_TOKEN: Final[str] = os.getenv("BOT_TOKEN", "")
-ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "0"))
-CHANNEL_ID: Final[int] = int(os.getenv("CHANNEL_ID", "0"))
 CHANNEL_USERNAME: Final[str] = os.getenv("CHANNEL_USERNAME", "")
 
 DATABASE_PATH: Final[str] = "data/database.db"
@@ -26,7 +39,6 @@ MESSAGE_DELAY_SECONDS: Final[float] = 0.3
 PROMO_CHECK_INTERVAL_HOURS: Final[int] = 24
 
 ADMIN_USERNAME: Final[str] = os.getenv("ADMIN_USERNAME", "")
-NOTIFICATION_CHAT_ID: Final[int] = int(os.getenv("NOTIFICATION_CHAT_ID", "0"))
 
 DEFAULT_PROMO_DAYS: Final[int] = 7
 MIN_PROMO_DAYS: Final[int] = 1
