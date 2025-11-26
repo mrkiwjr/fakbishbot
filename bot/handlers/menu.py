@@ -453,7 +453,9 @@ async def handle_feedback_message(update: Update, context: ContextTypes.DEFAULT_
         
         # Возвращаем в главное меню
         await show_main_menu(update, context)
-
+    else:
+        # Если не в режиме отзыва - передаем обработку дальше
+        return
 
 async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстового сообщения с данными бронирования"""
