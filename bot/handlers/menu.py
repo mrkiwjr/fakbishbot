@@ -302,29 +302,48 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Проверяем получал ли пользователь промокод на этой неделе
-    has_received = await promo_service.has_received_promo_this_week(user_id)
+    # ПРОВЕРЯЕМ используя существующий метод can_receive_promo
+    can_receive, reason = await promo_service.can_receive_promo(user_id)
     
-    if has_received:
-        # Если получал - показываем его текущий промокод
-        last_promo = await promo_service.get_last_received_promo(user_id)
+    if not can_receive:
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        if last_promo:
+        if reason == "no_promo":
             await send_text_message(
                 update,
                 context,
-                f"🎁 *Ваш промокод:*\n\n`{last_promo['code']}`\n\n"
-                f"📅 *Действует до:* {last_promo['expiry_date']}\n\n"
-                f"💡 *Промокод обновится в понедельник*",
+                NO_ACTIVE_PROMO_MESSAGE,
                 reply_markup,
                 edit=True,
                 photo_key="promo"
             )
+        elif reason == "already_received":
+            # Если уже получал - показываем его текущий промокод
+            last_promo = await promo_service.get_last_received_promo(user_id)
+            if last_promo:
+                await send_text_message(
+                    update,
+                    context,
+                    f"🎁 *Ваш промокод:*\n\n`{last_promo['code']}`\n\n"
+                    f"📅 *Действует до:* {last_promo['expiry_date']}\n\n"
+                    f"💡 *Промокод обновится в понедельник*",
+                    reply_markup,
+                    edit=True,
+                    photo_key="promo"
+                )
+            else:
+                await send_text_message(
+                    update,
+                    context,
+                    "Вы уже получили промокод на этой неделе.",
+                    reply_markup,
+                    edit=True,
+                    photo_key="promo"
+                )
         return
 
-    # Если не получал - выдаем новый случайный промокод
+    # Если может получить - выдаем новый случайный промокод
     received_promo = await promo_service.get_random_active_promo()
     
     if received_promo:
