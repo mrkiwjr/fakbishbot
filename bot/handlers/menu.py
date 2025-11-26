@@ -411,10 +411,10 @@ async def handle_leave_feedback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-async def handle_feedback_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстового сообщения с отзывом"""
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка всех текстовых сообщений"""
     user = update.effective_user
-    feedback_text = update.message.text
+    message_text = update.message.text
     
     if update.message.chat.type != 'private':
         return
@@ -424,12 +424,12 @@ async def handle_feedback_message(update: Update, context: ContextTypes.DEFAULT_
         # Убираем режим отзыва
         context.user_data.pop('feedback_mode', None)
         
-        # Формируем сообщение для канала
+        # Формируем сообщение для канала ОТЗЫВ
         admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
                        f"*Пользователь:*\n" \
                        f"👤 {user.first_name}\n" \
                        f"📱 @{user.username if user.username else 'нет username'}\n" \
-                       f"*Текст отзыва:*\n{feedback_text}\n\n"
+                       f"*Текст отзыва:*\n{message_text}\n\n"
         
         try:
             # Отправляем отзыв в канал
@@ -453,48 +453,34 @@ async def handle_feedback_message(update: Update, context: ContextTypes.DEFAULT_
         
         # Возвращаем в главное меню
         await show_main_menu(update, context)
+        
     else:
-        # Если не в режиме отзыва - передаем обработку дальше
-        return
+        # Если не в режиме отзыва - обрабатываем как БРОНЬ
+        admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
+                       f"*Клиент:*\n" \
+                       f"👤 {user.first_name}\n" \
+                       f"📱 @{user.username if user.username else 'нет username'}\n" \
+                       f"*Данные брони:*\n`{message_text}`\n\n"
 
-async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстового сообщения с данными бронирования"""
-   
-    user = update.effective_user
-    message_text = update.message.text
-    
-    if update.message.chat.type != 'private':
-        return
-    
-    # Если пользователь в режиме отзыва - игнорируем (обрабатывается в handle_feedback_message)
-    if context.user_data.get('feedback_mode'):
-        return
-    
-    admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
-                   f"*Клиент:*\n" \
-                   f"👤 {user.first_name}\n" \
-                   f"📱 @{user.username if user.username else 'нет username'}\n" \
-                   f"*Данные брони:*\n`{message_text}`\n\n"
-
-    try:
-        # Отправляем в канал
-        await context.bot.send_message(
-            chat_id=NOTIFICATION_CHAT_ID,
-            text=admin_message,
-            parse_mode='Markdown'
-        )
-        
-        # Подтверждение пользователю
-        await update.message.reply_text(
-            "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомления: {e}")
-        await update.message.reply_text(
-            "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
-        )
+        try:
+            # Отправляем в канал
+            await context.bot.send_message(
+                chat_id=NOTIFICATION_CHAT_ID,
+                text=admin_message,
+                parse_mode='Markdown'
+            )
+            
+            # Подтверждение пользователю
+            await update.message.reply_text(
+                "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления: {e}")
+            await update.message.reply_text(
+                "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
+            )
 
 
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):

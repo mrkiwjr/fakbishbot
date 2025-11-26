@@ -20,7 +20,7 @@ from bot.handlers.menu import (
     handle_feedback_message,
     menu_callback, 
     help_command, 
-    handle_book_pc_message,
+    handle_text_message,
     FEEDBACK
 )
 from bot.handlers.admin import (
@@ -182,15 +182,10 @@ def setup_handlers(application: Application):
     # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
 
-    # Обработчики сообщений - ВАЖНО: сначала отзывы, потом брони
+    # ОБНОВЛЕННЫЙ обработчик сообщений - один для всех текстовых сообщений
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-        handle_feedback_message
-    ))
-    
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-        handle_book_pc_message
+        handle_text_message
     ))
 
 
@@ -229,4 +224,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
