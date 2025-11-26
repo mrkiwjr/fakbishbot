@@ -17,10 +17,10 @@ from bot.services.database import db
 from bot.handlers.menu import (
     menu_start,
     handle_leave_feedback,
-    handle_feedback_message,
+    handle_text_message,  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
     menu_callback, 
     help_command, 
-    handle_text_message,
+    # УБРАЛ: handle_book_pc_message - теперь объединено в handle_text_message
     FEEDBACK
 )
 from bot.handlers.admin import (
@@ -185,7 +185,7 @@ def setup_handlers(application: Application):
     # ОБНОВЛЕННЫЙ обработчик сообщений - один для всех текстовых сообщений
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-        handle_text_message
+        handle_text_message  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
     ))
 
 
@@ -224,3 +224,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
