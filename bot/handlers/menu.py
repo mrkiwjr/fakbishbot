@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 import os
 import logging
@@ -26,7 +26,7 @@ from bot.middleware.message_cleanup import message_cleanup
 
 logger = logging.getLogger(__name__)
 
-MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS, AWAITING_FEEDBACK = range(8)
+MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
 
 
 async def send_text_message(
@@ -83,6 +83,7 @@ async def send_text_message(
         context
     )
     return response
+
 
 async def send_menu_with_photo(
     update: Update,
@@ -174,6 +175,7 @@ async def send_menu_with_photo(
     except Exception as e:
         logger.error(f"Неожиданная ошибка при отправке меню с фото {photo_key}: {e}")
         return await send_text_fallback()
+
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
     keyboard = [
@@ -393,8 +395,11 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_leave_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало процесса оставления отзыва"""
+    """Начало процесса оставления отзыва - просим пользователя написать отзыв"""
     query = update.callback_query
+    
+    # Сохраняем состояние что пользователь оставляет отзыв
+    context.user_data['feedback_mode'] = True
     
     keyboard = [[InlineKeyboardButton("🔙 Отмена", callback_data=str(FEEDBACK))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -404,55 +409,90 @@ async def handle_leave_feedback(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
-    
-    return AWAITING_FEEDBACK
 
 
-async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текста отзыва"""
+async def handle_feedback_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового сообщения с отзывом"""
     user = update.effective_user
     feedback_text = update.message.text
     
     if update.message.chat.type != 'private':
-        return ConversationHandler.END
+        return
     
-    # Формируем сообщение для админа
-    admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
-                   f"*Пользователь:*\n" \
+    # Проверяем, находится ли пользователь в режиме отзыва
+    if context.user_data.get('feedback_mode'):
+        # Убираем режим отзыва
+        context.user_data.pop('feedback_mode', None)
+        
+        # Формируем сообщение для канала
+        admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
+                       f"*Пользователь:*\n" \
+                       f"👤 {user.first_name}\n" \
+                       f"📱 @{user.username if user.username else 'нет username'}\n" \
+                       f"*Текст отзыва:*\n{feedback_text}\n\n"
+        
+        try:
+            # Отправляем отзыв в канал
+            await context.bot.send_message(
+                chat_id=NOTIFICATION_CHAT_ID,
+                text=admin_message,
+                parse_mode='Markdown'
+            )
+            
+            # Подтверждение пользователю
+            await update.message.reply_text(
+                "✅ *Спасибо за ваш отзыв!*\n\nВаши отзывы помогают нам становиться лучше! 🥷",
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка отправки отзыва: {e}")
+            await update.message.reply_text(
+                "❌ Произошла ошибка при отправке отзыва. Пожалуйста, попробуйте позже."
+            )
+        
+        # Возвращаем в главное меню
+        await show_main_menu(update, context)
+
+
+async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового сообщения с данными бронирования"""
+   
+    user = update.effective_user
+    message_text = update.message.text
+    
+    if update.message.chat.type != 'private':
+        return
+    
+    # Если пользователь в режиме отзыва - игнорируем (обрабатывается в handle_feedback_message)
+    if context.user_data.get('feedback_mode'):
+        return
+    
+    admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
+                   f"*Клиент:*\n" \
                    f"👤 {user.first_name}\n" \
                    f"📱 @{user.username if user.username else 'нет username'}\n" \
-                   f"*Текст отзыва:*\n{feedback_text}\n\n"
-    
+                   f"*Данные брони:*\n`{message_text}`\n\n"
+
     try:
-        # Отправляем отзыв админу в личные сообщения
+        # Отправляем в канал
         await context.bot.send_message(
-            chat_id=ADMIN_USERNAME,
+            chat_id=NOTIFICATION_CHAT_ID,
             text=admin_message,
             parse_mode='Markdown'
         )
         
         # Подтверждение пользователю
         await update.message.reply_text(
-            "✅ *Спасибо за ваш отзыв!*\n\nВаши отзывы помогают нам становиться лучше! 🥷",
+            "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
             parse_mode='Markdown'
         )
         
     except Exception as e:
-        logger.error(f"Ошибка отправки отзыва: {e}")
+        logger.error(f"Ошибка отправки уведомления: {e}")
         await update.message.reply_text(
-            "❌ Произошла ошибка при отправке отзыва. Пожалуйста, попробуйте позже."
+            "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
         )
-    
-    # Возвращаем в главное меню
-    await show_main_menu(update, context)
-    return ConversationHandler.END
-
-
-async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена оставления отзыва"""
-    await update.message.reply_text("❌ Отмена оставления отзыва.")
-    await show_main_menu(update, context)
-    return ConversationHandler.END
 
 
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -471,56 +511,6 @@ async def handle_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await send_menu_with_photo(update, context, "tariffs", TARIFFS_MESSAGE, reply_markup, edit=True)
-
-
-async def handle_book_pc_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстового сообщения с данными бронирования"""
-
-    # Если пользователь в состоянии ConversationHandler - игнорируем
-    if context.user_data:
-        # Проверяем различные возможные ключи состояния
-        state_keys = [
-            context.user_data.get('_conversation_state'),
-            context.user_data.get('conversation_state'), 
-            context.user_data.get('state'),
-            context.user_data.get('_state')
-        ]
-        
-        # Если есть любое состояние ConversationHandler - выходим
-        if any(state_keys):
-            return
-    
-    user = update.effective_user
-    message_text = update.message.text
-    
-    if update.message.chat.type != 'private':
-        return
-    
-    admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
-                   f"*Клиент:*\n" \
-                   f"👤 {user.first_name}\n" \
-                   f"📱 @{user.username if user.username else 'нет username'}\n" \
-                   f"*Данные брони:*\n`{message_text}`\n\n"
-
-    try:
-        # Отправляем только в группу
-        await context.bot.send_message(
-            chat_id=NOTIFICATION_CHAT_ID,
-            text=admin_message,
-            parse_mode='Markdown'
-        )
-        
-        # Подтверждение пользователю
-        await update.message.reply_text(
-            "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомления: {e}")
-        await update.message.reply_text(
-            "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
-        )
 
 
 async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
