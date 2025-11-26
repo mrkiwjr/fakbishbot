@@ -325,9 +325,8 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await send_text_message(
                     update,
                     context,
-                    f"🎁 *Ваш промокод:*\n\n`{last_promo['code']}`\n\n"
-                    f"📅 *Действует до:* {last_promo['expiry_date']}\n\n"
-                    f"💡 *Промокод обновится в понедельник*",
+                    f"🎁 Ваш промокод:\n\n`{last_promo['code']}`\n\n"
+                    f"📅 Действует до: {last_promo['expiry_date']}\n\n",
                     reply_markup,
                     edit=True,
                     photo_key="promo"
