@@ -180,15 +180,15 @@ async def send_menu_with_photo(
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
     keyboard = [
         [
-            InlineKeyboardButton("🎁 Получить промокод", callback_data=str(PROMO)),
-            InlineKeyboardButton("💻 Забронировать ПК", callback_data=str(BOOK_PC))
+            InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
+            InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
         ],
         [
             InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
             InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
         ],
         [
-            InlineKeyboardButton("📝 Обратная связь", callback_data=str(FEEDBACK)),
+            InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
             InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
         ]
     ]
