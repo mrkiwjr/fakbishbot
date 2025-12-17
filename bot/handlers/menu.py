@@ -397,6 +397,11 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
+    # Включаем режим брони и выключаем другие режимы ввода текста
+    context.user_data['booking_mode'] = True
+    context.user_data.pop('feedback_mode', None)
+    context.user_data.pop('winter_drop_mode', None)
+
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -405,6 +410,11 @@ async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+
+    # Включаем режим отзывов и выключаем другие режимы ввода текста
+    context.user_data['feedback_mode'] = False  # сбросим, если что-то осталось
+    context.user_data.pop('booking_mode', None)
+    context.user_data.pop('winter_drop_mode', None)
 
     keyboard = [
         [InlineKeyboardButton("💬 Оставить отзыв", callback_data="leave_feedback")],
@@ -419,8 +429,11 @@ async def handle_leave_feedback(update: Update, context: ContextTypes.DEFAULT_TY
     """Начало процесса оставления отзыва - просим пользователя написать отзыв"""
     query = update.callback_query
     
-    # Сохраняем состояние что пользователь оставляет отзыв
+    # Сохраняем состояние что пользователь оставляет отзыв,
+    # и выключаем остальные режимы, если они были
     context.user_data['feedback_mode'] = True
+    context.user_data.pop('booking_mode', None)
+    context.user_data.pop('winter_drop_mode', None)
     
     keyboard = [[InlineKeyboardButton("🔙 Отмена", callback_data=str(FEEDBACK))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -513,13 +526,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Возвращаем в главное меню
             await show_main_menu(update, context)
 
-        else:
-            # Если не в специальных режимах - обрабатываем как БРОНЬ
-            admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
-                           f"*Клиент:*\n" \
-                           f"👤 {user.first_name}\n" \
-                           f"📱 @{user.username if user.username else 'нет username'}\n" \
-                           f"*Данные брони:*\n`{message_text}`\n\n"
+        # Если пользователь в режиме брони
+        elif context.user_data.get('booking_mode'):
+            # Убираем режим брони
+            context.user_data.pop('booking_mode', None)
+
+            admin_message = (
+                f"🎯 *НОВАЯ БРОНЬ!*\n\n"
+                f"*Клиент:*\n"
+                f"👤 {user.first_name}\n"
+                f"📱 @{user.username if user.username else 'нет username'}\n"
+                f"*Данные брони:*\n`{message_text}`\n\n"
+            )
 
             try:
                 # Отправляем в канал
@@ -541,12 +559,20 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
                 )
 
+            # Возвращаем в главное меню
+            await show_main_menu(update, context)
+
+        else:
+            # Если пользователь не в одном из специальных режимов,
+            # просто показываем главное меню и ничего никуда не отправляем
+            await show_main_menu(update, context)
+
 
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
     keyboard = [
-        [InlineKeyboardButton("KATANA WINTER DROP", callback_data="winter_drop")],
+        [InlineKeyboardButton("❄️ KATANA WINTER DROP", callback_data="winter_drop")],
         [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -597,8 +623,11 @@ async def handle_winter_drop(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Начало процесса участия в KATANA WINTER DROP — просим пользователя ввести данные"""
     query = update.callback_query
 
-    # Сохраняем состояние, что пользователь заполняет данные для розыгрыша
+    # Сохраняем состояние, что пользователь заполняет данные для розыгрыша,
+    # и выключаем остальные режимы
     context.user_data['winter_drop_mode'] = True
+    context.user_data.pop('feedback_mode', None)
+    context.user_data.pop('booking_mode', None)
 
     keyboard = [[InlineKeyboardButton("🔙 Отмена", callback_data=str(PROMOTIONS))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
