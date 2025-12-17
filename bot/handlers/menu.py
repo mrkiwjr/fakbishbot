@@ -277,6 +277,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "leave_feedback":
         await handle_leave_feedback(update, context)
 
+    elif data == "winter_drop":
+        await handle_winter_drop(update, context)
+
 
 async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -471,40 +474,81 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Возвращаем в главное меню
         await show_main_menu(update, context)
-        
-    else:
-        # Если не в режиме отзыва - обрабатываем как БРОНЬ
-        admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
-                       f"*Клиент:*\n" \
-                       f"👤 {user.first_name}\n" \
-                       f"📱 @{user.username if user.username else 'нет username'}\n" \
-                       f"*Данные брони:*\n`{message_text}`\n\n"
 
-        try:
-            # Отправляем в канал
-            await context.bot.send_message(
-                chat_id=NOTIFICATION_CHAT_ID,
-                text=admin_message,
-                parse_mode='Markdown'
+    else:
+        # Проверяем, находится ли пользователь в режиме участия в KATANA WINTER DROP
+        if context.user_data.get('winter_drop_mode'):
+            # Убираем режим WINTER DROP
+            context.user_data.pop('winter_drop_mode', None)
+
+            # Формируем сообщение для канала
+            admin_message = (
+                f"🎯 *KATANA WINTER DROP!*\n\n"
+                f"*Участник:*\n"
+                f"👤 {user.first_name}\n"
+                f"📱 @{user.username if user.username else 'нет username'}\n"
+                f"*Данные участника:*\n`{message_text}`\n\n"
             )
-            
-            # Подтверждение пользователю
-            await update.message.reply_text(
-                "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка отправки уведомления: {e}")
-            await update.message.reply_text(
-                "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
-            )
+
+            try:
+                # Отправляем данные участника в канал
+                await context.bot.send_message(
+                    chat_id=NOTIFICATION_CHAT_ID,
+                    text=admin_message,
+                    parse_mode='Markdown'
+                )
+
+                # Подтверждение пользователю
+                await update.message.reply_text(
+                    "✅ *Заявка на участие принята!*\n\nМы получили ваши данные и свяжемся с вами при необходимости.",
+                    parse_mode='Markdown'
+                )
+
+            except Exception as e:
+                logger.error(f"Ошибка отправки данных KATANA WINTER DROP: {e}")
+                await update.message.reply_text(
+                    "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже."
+                )
+
+            # Возвращаем в главное меню
+            await show_main_menu(update, context)
+
+        else:
+            # Если не в специальных режимах - обрабатываем как БРОНЬ
+            admin_message = f"🎯 *НОВАЯ БРОНЬ!*\n\n" \
+                           f"*Клиент:*\n" \
+                           f"👤 {user.first_name}\n" \
+                           f"📱 @{user.username if user.username else 'нет username'}\n" \
+                           f"*Данные брони:*\n`{message_text}`\n\n"
+
+            try:
+                # Отправляем в канал
+                await context.bot.send_message(
+                    chat_id=NOTIFICATION_CHAT_ID,
+                    text=admin_message,
+                    parse_mode='Markdown'
+                )
+
+                # Подтверждение пользователю
+                await update.message.reply_text(
+                    "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
+                    parse_mode='Markdown'
+                )
+
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления: {e}")
+                await update.message.reply_text(
+                    "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
+                )
 
 
 async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
+    keyboard = [
+        [InlineKeyboardButton("KATANA WINTER DROP", callback_data="winter_drop")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await send_menu_with_photo(update, context, "promotions", PROMOTIONS_MESSAGE, reply_markup, edit=True)
@@ -547,3 +591,25 @@ async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_T
         except BadRequest as e:
             if "message is not modified" not in str(e).lower():
                 raise
+
+
+async def handle_winter_drop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало процесса участия в KATANA WINTER DROP — просим пользователя ввести данные"""
+    query = update.callback_query
+
+    # Сохраняем состояние, что пользователь заполняет данные для розыгрыша
+    context.user_data['winter_drop_mode'] = True
+
+    keyboard = [[InlineKeyboardButton("🔙 Отмена", callback_data=str(PROMOTIONS))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=(
+            "❄️ *KATANA WINTER DROP*\n\n"
+            "Привет! Для участия в розыгрыше, пожалуйста укажи:\n"
+            "• ФИО\n"
+            "• Контактный номер телефона"
+        ),
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
