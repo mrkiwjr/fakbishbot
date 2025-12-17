@@ -251,6 +251,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == str(MAIN):
+        # Сбрасываем все режимы ввода при возврате в главное меню
+        context.user_data.pop('booking_mode', None)
+        context.user_data.pop('feedback_mode', None)
+        context.user_data.pop('winter_drop_mode', None)
         await show_main_menu(update, context, edit=True)
 
     elif data == str(PROMO):
@@ -263,9 +267,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_book_pc(update, context)
 
     elif data == str(FEEDBACK):
+        # Сбрасываем режим отзыва при возврате в раздел отзывов
+        context.user_data.pop('feedback_mode', None)
         await handle_feedback(update, context)
 
     elif data == str(PROMOTIONS):
+        # Сбрасываем режим WINTER DROP при возврате в раздел акций
+        context.user_data.pop('winter_drop_mode', None)
         await handle_promotions(update, context)
 
     elif data == str(TARIFFS):
@@ -411,10 +419,10 @@ async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    # Включаем режим отзывов и выключаем другие режимы ввода текста
-    context.user_data['feedback_mode'] = False  # сбросим, если что-то осталось
+    # Выключаем другие режимы ввода текста
     context.user_data.pop('booking_mode', None)
     context.user_data.pop('winter_drop_mode', None)
+    context.user_data.pop('feedback_mode', None)  # Сбрасываем режим отзыва
 
     keyboard = [
         [InlineKeyboardButton("💬 Оставить отзыв", callback_data="leave_feedback")],
