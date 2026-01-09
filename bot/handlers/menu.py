@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
 
 
+def escape_html(text: str) -> str:
+    """Экранирует специальные символы HTML для безопасного отображения в Telegram"""
+    if not text:
+        return ''
+    return (text
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;'))
+
+
 async def send_text_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -466,19 +476,26 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Убираем режим отзыва
         context.user_data.pop('feedback_mode', None)
         
-        # Формируем сообщение для канала ОТЗЫВ
-        admin_message = f"💬 *НОВЫЙ ОТЗЫВ!*\n\n" \
-                       f"*Пользователь:*\n" \
-                       f"👤 {user.first_name}\n" \
-                       f"📱 @{user.username if user.username else 'нет username'}\n" \
-                       f"*Текст отзыва:*\n{message_text}\n\n"
+        # Экранируем специальные символы HTML для безопасного отображения
+        escaped_first_name = escape_html(user.first_name or 'Не указано')
+        escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
+        escaped_feedback = escape_html(message_text)
+        
+        # Формируем сообщение для канала ОТЗЫВ с HTML разметкой
+        admin_message = (
+            f"💬 <b>НОВЫЙ ОТЗЫВ!</b>\n\n"
+            f"<b>Пользователь:</b>\n"
+            f"👤 {escaped_first_name}\n"
+            f"📱 {escaped_username}\n"
+            f"<b>Текст отзыва:</b>\n{escaped_feedback}\n\n"
+        )
         
         try:
             # Отправляем отзыв в канал
             await context.bot.send_message(
                 chat_id=NOTIFICATION_CHAT_ID,
                 text=admin_message,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
             # Подтверждение пользователю
@@ -502,13 +519,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Убираем режим WINTER DROP
             context.user_data.pop('winter_drop_mode', None)
 
-            # Формируем сообщение для канала
+            # Экранируем специальные символы HTML для безопасного отображения
+            escaped_first_name = escape_html(user.first_name or 'Не указано')
+            escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
+            escaped_message = escape_html(message_text)
+            
+            # Формируем сообщение для канала с HTML разметкой
             admin_message = (
-                f"🎯 *KATANA WINTER DROP!*\n\n"
-                f"*Участник:*\n"
-                f"👤 {user.first_name}\n"
-                f"📱 @{user.username if user.username else 'нет username'}\n"
-                f"*Данные участника:*\n`{message_text}`\n\n"
+                f"🎯 <b>KATANA WINTER DROP!</b>\n\n"
+                f"<b>Участник:</b>\n"
+                f"👤 {escaped_first_name}\n"
+                f"📱 {escaped_username}\n"
+                f"<b>Данные участника:</b>\n<code>{escaped_message}</code>\n\n"
             )
 
             try:
@@ -516,7 +538,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.send_message(
                     chat_id=NOTIFICATION_CHAT_ID,
                     text=admin_message,
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
 
                 # Подтверждение пользователю
@@ -539,12 +561,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Убираем режим брони
             context.user_data.pop('booking_mode', None)
 
+            # Экранируем специальные символы HTML для безопасного отображения
+            escaped_first_name = escape_html(user.first_name or 'Не указано')
+            escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
+            escaped_booking = escape_html(message_text)
+            
             admin_message = (
-                f"🎯 *НОВАЯ БРОНЬ!*\n\n"
-                f"*Клиент:*\n"
-                f"👤 {user.first_name}\n"
-                f"📱 @{user.username if user.username else 'нет username'}\n"
-                f"*Данные брони:*\n`{message_text}`\n\n"
+                f"🎯 <b>НОВАЯ БРОНЬ!</b>\n\n"
+                f"<b>Клиент:</b>\n"
+                f"👤 {escaped_first_name}\n"
+                f"📱 {escaped_username}\n"
+                f"<b>Данные брони:</b>\n<code>{escaped_booking}</code>\n\n"
             )
 
             try:
@@ -552,7 +579,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.send_message(
                     chat_id=NOTIFICATION_CHAT_ID,
                     text=admin_message,
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
 
                 # Подтверждение пользователю
