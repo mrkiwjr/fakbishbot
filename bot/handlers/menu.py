@@ -1,8 +1,9 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import ContextTypes
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TimedOut, NetworkError
 import os
 import logging
+import asyncio
 
 from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID, MENU_PHOTOS
 from bot.constants import (
@@ -27,6 +28,10 @@ from bot.middleware.message_cleanup import message_cleanup
 logger = logging.getLogger(__name__)
 
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
+
+# Константы для обработки таймаутов
+MAX_RETRY_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 1.0
 
 
 def escape_html(text: str) -> str:
@@ -54,38 +59,72 @@ async def send_text_message(
             if is_valid:
                 try:
                     cached_file_id = photo_cache.get_file_id(photo_key, photo_path)
+                    response = None
 
                     if cached_file_id:
-                        response = await update.effective_chat.send_photo(
-                            photo=cached_file_id,
-                            caption=text,
-                            reply_markup=reply_markup
-                        )
+                        # Попытка отправки с retry логикой
+                        for attempt in range(MAX_RETRY_ATTEMPTS):
+                            try:
+                                response = await update.effective_chat.send_photo(
+                                    photo=cached_file_id,
+                                    caption=text,
+                                    reply_markup=reply_markup
+                                )
+                                break
+                            except (TimedOut, NetworkError) as e:
+                                if attempt < MAX_RETRY_ATTEMPTS - 1:
+                                    logger.warning(f"Таймаут при отправке фото (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                                else:
+                                    raise
                     else:
                         with open(photo_path, 'rb') as photo_file:
-                            response = await update.effective_chat.send_photo(
-                                photo=InputFile(photo_file),
-                                caption=text,
-                                reply_markup=reply_markup
-                            )
+                            for attempt in range(MAX_RETRY_ATTEMPTS):
+                                try:
+                                    response = await update.effective_chat.send_photo(
+                                        photo=InputFile(photo_file),
+                                        caption=text,
+                                        reply_markup=reply_markup
+                                    )
+                                    if response.photo:
+                                        new_file_id = response.photo[-1].file_id
+                                        photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+                                    break
+                                except (TimedOut, NetworkError) as e:
+                                    if attempt < MAX_RETRY_ATTEMPTS - 1:
+                                        logger.warning(f"Таймаут при отправке фото через файл (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                                        await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                                        photo_file.seek(0)
+                                    else:
+                                        raise
 
-                        if response.photo:
-                            new_file_id = response.photo[-1].file_id
-                            photo_cache.save_file_id(photo_key, photo_path, new_file_id)
-
-                    await message_cleanup.track_bot_message(
-                        update.effective_chat.id,
-                        response.message_id,
-                        context
-                    )
-                    return response
+                    if response:
+                        await message_cleanup.track_bot_message(
+                            update.effective_chat.id,
+                            response.message_id,
+                            context
+                        )
+                        return response
+                except (TimedOut, NetworkError) as e:
+                    logger.warning(f"Ошибка сети при отправке фото для {photo_key}: {e}")
                 except Exception as e:
                     logger.warning(f"Ошибка отправки фото для {photo_key}: {e}")
 
-    response = await update.effective_chat.send_message(
-        text=text,
-        reply_markup=reply_markup
-    )
+    # Отправка текстового сообщения с retry логикой
+    for attempt in range(MAX_RETRY_ATTEMPTS):
+        try:
+            response = await update.effective_chat.send_message(
+                text=text,
+                reply_markup=reply_markup
+            )
+            break
+        except (TimedOut, NetworkError) as e:
+            if attempt < MAX_RETRY_ATTEMPTS - 1:
+                logger.warning(f"Таймаут при отправке текстового сообщения (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+            else:
+                logger.error(f"Не удалось отправить текстовое сообщение после {MAX_RETRY_ATTEMPTS} попыток: {e}")
+                raise
 
     await message_cleanup.track_bot_message(
         update.effective_chat.id,
@@ -107,17 +146,32 @@ async def send_menu_with_photo(
     photo_path = MENU_PHOTOS.get(photo_key)
 
     async def send_text_fallback():
-        response = await update.effective_chat.send_message(
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
-        await message_cleanup.track_bot_message(
-            update.effective_chat.id,
-            response.message_id,
-            context
-        )
-        return response
+        """Отправка текстового сообщения с retry логикой при таймаутах"""
+        last_error = None
+        for attempt in range(MAX_RETRY_ATTEMPTS):
+            try:
+                response = await update.effective_chat.send_message(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                await message_cleanup.track_bot_message(
+                    update.effective_chat.id,
+                    response.message_id,
+                    context
+                )
+                return response
+            except (TimedOut, NetworkError) as e:
+                last_error = e
+                if attempt < MAX_RETRY_ATTEMPTS - 1:
+                    logger.warning(f"Таймаут при отправке сообщения (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                else:
+                    logger.error(f"Не удалось отправить сообщение после {MAX_RETRY_ATTEMPTS} попыток: {e}")
+                    raise
+        
+        if last_error:
+            raise last_error
 
     if not photo_path or not os.path.exists(photo_path):
         logger.debug(f"Фото для {photo_key} не найдено, отправка текстового меню")
@@ -132,47 +186,95 @@ async def send_menu_with_photo(
         cached_file_id = photo_cache.get_file_id(photo_key, photo_path)
 
         if cached_file_id:
-            try:
-                response = await update.effective_chat.send_photo(
-                    photo=cached_file_id,
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
-                )
-                logger.debug(f"Отправлено фото {photo_key} через кешированный file_id")
-            except Exception as cache_error:
-                logger.warning(f"Ошибка использования кешированного file_id для {photo_key}: {cache_error}")
-                with open(photo_path, 'rb') as photo_file:
+            # Попытка отправки с кешированным file_id с retry логикой
+            success = False
+            for attempt in range(MAX_RETRY_ATTEMPTS):
+                try:
                     response = await update.effective_chat.send_photo(
-                        photo=InputFile(photo_file),
+                        photo=cached_file_id,
                         caption=text,
                         reply_markup=reply_markup,
                         parse_mode=parse_mode
                     )
-
-                if response.photo:
-                    new_file_id = response.photo[-1].file_id
-                    photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+                    logger.debug(f"Отправлено фото {photo_key} через кешированный file_id")
+                    success = True
+                    break
+                except (TimedOut, NetworkError) as e:
+                    if attempt < MAX_RETRY_ATTEMPTS - 1:
+                        logger.warning(f"Таймаут при отправке фото с file_id (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                        await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                    else:
+                        logger.warning(f"Не удалось отправить фото с file_id после {MAX_RETRY_ATTEMPTS} попыток, пробуем через файл")
+                        break
+                except Exception as cache_error:
+                    logger.warning(f"Ошибка использования кешированного file_id для {photo_key}: {cache_error}")
+                    break
+            
+            # Если не удалось отправить с file_id, пробуем через файл
+            if not success:
+                try:
+                    with open(photo_path, 'rb') as photo_file:
+                        for attempt in range(MAX_RETRY_ATTEMPTS):
+                            try:
+                                response = await update.effective_chat.send_photo(
+                                    photo=InputFile(photo_file),
+                                    caption=text,
+                                    reply_markup=reply_markup,
+                                    parse_mode=parse_mode
+                                )
+                                if response.photo:
+                                    new_file_id = response.photo[-1].file_id
+                                    photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+                                success = True
+                                break
+                            except (TimedOut, NetworkError) as e:
+                                if attempt < MAX_RETRY_ATTEMPTS - 1:
+                                    logger.warning(f"Таймаут при отправке фото через файл (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                                    photo_file.seek(0)
+                                else:
+                                    logger.error(f"Не удалось отправить фото через файл после {MAX_RETRY_ATTEMPTS} попыток")
+                                    return await send_text_fallback()
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке фото через файл: {e}")
+                    return await send_text_fallback()
         else:
+            # Отправка фото без кеша с retry логикой
+            success = False
             with open(photo_path, 'rb') as photo_file:
-                response = await update.effective_chat.send_photo(
-                    photo=InputFile(photo_file),
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
-                )
+                for attempt in range(MAX_RETRY_ATTEMPTS):
+                    try:
+                        response = await update.effective_chat.send_photo(
+                            photo=InputFile(photo_file),
+                            caption=text,
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode
+                        )
 
-            if response.photo:
-                new_file_id = response.photo[-1].file_id
-                photo_cache.save_file_id(photo_key, photo_path, new_file_id)
-                logger.info(f"Отправлено и кешировано фото {photo_key}")
+                        if response.photo:
+                            new_file_id = response.photo[-1].file_id
+                            photo_cache.save_file_id(photo_key, photo_path, new_file_id)
+                            logger.info(f"Отправлено и кешировано фото {photo_key}")
+                        success = True
+                        break
+                    except (TimedOut, NetworkError) as e:
+                        if attempt < MAX_RETRY_ATTEMPTS - 1:
+                            logger.warning(f"Таймаут при отправке фото (попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}")
+                            await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                            photo_file.seek(0)
+                        else:
+                            logger.error(f"Не удалось отправить фото после {MAX_RETRY_ATTEMPTS} попыток: {e}")
+                            return await send_text_fallback()
 
-        await message_cleanup.track_bot_message(
-            update.effective_chat.id,
-            response.message_id,
-            context
-        )
-        return response
+        if success:
+            await message_cleanup.track_bot_message(
+                update.effective_chat.id,
+                response.message_id,
+                context
+            )
+            return response
+        else:
+            return await send_text_fallback()
 
     except BadRequest as e:
         error_message = str(e).lower()
@@ -180,6 +282,10 @@ async def send_menu_with_photo(
             logger.warning(f"Telegram не смог обработать изображение {photo_key}, отправка текстового меню")
         else:
             logger.error(f"Ошибка BadRequest при отправке меню с фото {photo_key}: {e}")
+        return await send_text_fallback()
+
+    except (TimedOut, NetworkError) as e:
+        logger.error(f"Ошибка сети/таймаут при отправке меню с фото {photo_key}: {e}")
         return await send_text_fallback()
 
     except Exception as e:

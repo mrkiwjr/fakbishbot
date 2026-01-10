@@ -11,6 +11,7 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
+from telegram.error import TimedOut, NetworkError
 
 from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
 from bot.services.database import db
@@ -95,6 +96,20 @@ async def cleanup_expired_promos(context: ContextTypes.DEFAULT_TYPE):
             logger.debug("Истекших промокодов для удаления не найдено")
     except Exception as e:
         logger.error(f"Ошибка при очистке истекших промокодов: {e}")
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Глобальный обработчик ошибок для логирования таймаутов и других сетевых ошибок"""
+    logger = logging.getLogger(__name__)
+    
+    error = context.error
+    
+    if isinstance(error, TimedOut):
+        logger.warning(f"Таймаут при обработке обновления: {error}")
+    elif isinstance(error, NetworkError):
+        logger.warning(f"Ошибка сети при обработке обновления: {error}")
+    else:
+        logger.error(f"Необработанная ошибка: {error}", exc_info=error)
 
 
 async def init_application(application: Application):
@@ -206,6 +221,9 @@ def main():
     try:
         # Создание приложения
         application = Application.builder().token(BOT_TOKEN).post_init(init_application).build()
+
+        # Добавление глобального обработчика ошибок
+        application.add_error_handler(error_handler)
 
         # Настройка обработчиков
         setup_handlers(application)
