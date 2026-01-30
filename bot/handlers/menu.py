@@ -543,14 +543,15 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('feedback_mode', None)
     context.user_data.pop('winter_drop_mode', None)
 
-    keyboard = [[InlineKeyboardButton("🔙 Завершить диалог", callback_data="end_admin_chat")]]
+    keyboard = [[InlineKeyboardButton("Завершить диалог", callback_data="end_admin_chat")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
         text=(
-            "✉️ *Связь с администратором*\n\n"
-            "Напишите ваш вопрос одним или несколькими сообщениями.\n"
-            "Администратор ответит вам здесь, в этом чате."
+            "*Связь с администратором*\n\n"
+            "Вы можете задать любой вопрос в свободной форме.\n"
+            "Все ваши сообщения будут автоматически направлены администратору.\n\n"
+            "Ответ администратора будет отправлен в этот диалог."
         ),
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -562,13 +563,14 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                "*Новый диалог с пользователем*\n\n"
+                "<b>Новый диалог с пользователем</b>\n\n"
+                f"Идентификатор пользователя: <code>{user.id}</code>\n"
                 f"Имя: {escape_html(user.first_name or 'Не указано')}\n"
-                f"Username: {escape_html(username)}\n"
-                f"ID: `{user.id}`\n\n"
-                "Ответьте *ответом* на пересланные ботом сообщения, чтобы пользователь получил ответ."
+                f"Имя пользователя: {escape_html(username)}\n\n"
+                "Дальнейшие сообщения этого пользователя будут поступать в данный чат.\n"
+                "Для отправки ответа пользователю необходимо ответить на соответствующее сообщение в формате «Ответить»."
             ),
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
     except Exception as e:
         logger.warning(f"Не удалось уведомить админа о начале диалога: {e}")
@@ -636,20 +638,32 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Если пользователь в режиме живого диалога с админом
     if context.user_data.get('admin_chat_mode'):
         try:
-            # Пересылаем сообщение админу, сохраняя forward_from
-            await context.bot.forward_message(
+            username = f"@{user.username}" if user.username else "нет username"
+            escaped_first_name = escape_html(user.first_name or "Не указано")
+            escaped_username = escape_html(username)
+            escaped_message = escape_html(message_text)
+
+            admin_message = (
+                "<b>Новое сообщение от пользователя</b>\n\n"
+                f"Идентификатор пользователя: <code>{user.id}</code>\n"
+                f"Имя: {escaped_first_name}\n"
+                f"Имя пользователя: {escaped_username}\n\n"
+                f"<b>Текст сообщения:</b>\n{escaped_message}"
+            )
+
+            await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                from_chat_id=update.effective_chat.id,
-                message_id=update.message.message_id
+                text=admin_message,
+                parse_mode="HTML",
             )
 
             await update.message.reply_text(
-                "✉️ *Сообщение отправлено администратору.*\n\n"
-                "Ожидайте ответа, он придет сюда же.",
-                parse_mode='Markdown'
+                "Ваше сообщение передано администратору.\n\n"
+                "Ответ будет направлен в этот диалог.",
+                parse_mode="Markdown",
             )
         except Exception as e:
-            logger.error(f"Ошибка при пересылке сообщения админу: {e}")
+            logger.error(f"Ошибка при отправке сообщения админу: {e}")
             await update.message.reply_text(
                 "❌ Не удалось отправить сообщение администратору. Пожалуйста, попробуйте позже."
             )
