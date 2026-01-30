@@ -404,6 +404,14 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "winter_drop":
         await handle_winter_drop(update, context)
 
+    elif data == "contact_admin":
+        await handle_contact_admin(update, context)
+
+    elif data == "end_admin_chat":
+        # Выходим из режима чата с админом и возвращаемся в раздел помощи
+        context.user_data.pop('admin_chat_mode', None)
+        await handle_help(update, context)
+
 
 async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -507,15 +515,61 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
 
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     if user_id == ADMIN_ID:
         text = HELP_ADMIN_MESSAGE
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     else:
         text = HELP_USER_MESSAGE
+        keyboard = [
+            [InlineKeyboardButton("💬 Связаться с админом", callback_data="contact_admin")],
+            [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+        ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
     await send_menu_with_photo(update, context, "help", text, reply_markup, edit=True)
+
+
+async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Включаем режим живого диалога с админом через бота."""
+    query = update.callback_query
+    user = update.effective_user
+
+    # Включаем режим чата с админом и выключаем остальные режимы
+    context.user_data['admin_chat_mode'] = True
+    context.user_data.pop('booking_mode', None)
+    context.user_data.pop('feedback_mode', None)
+    context.user_data.pop('winter_drop_mode', None)
+
+    keyboard = [[InlineKeyboardButton("🔙 Завершить диалог", callback_data="end_admin_chat")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=(
+            "✉️ *Связь с администратором*\n\n"
+            "Напишите ваш вопрос одним или несколькими сообщениями.\n"
+            "Администратор ответит вам здесь, в этом чате."
+        ),
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+    # Уведомляем админа, что пользователь начал диалог
+    try:
+        username = f"@{user.username}" if user.username else "нет username"
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                "🟢 *Новый диалог с пользователем*\n\n"
+                f"👤 Имя: {escape_html(user.first_name or 'Не указано')}\n"
+                f"📱 Username: {escape_html(username)}\n"
+                f"🆔 ID: `{user.id}`\n\n"
+                "Ответьте *ответом* на пересланные ботом сообщения, чтобы пользователь получил ответ."
+            ),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось уведомить админа о начале диалога: {e}")
 
 
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -576,7 +630,31 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if update.message.chat.type != 'private':
         return
-    
+
+    # Если пользователь в режиме живого диалога с админом
+    if context.user_data.get('admin_chat_mode'):
+        try:
+            # Пересылаем сообщение админу, сохраняя forward_from
+            await context.bot.forward_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
+
+            await update.message.reply_text(
+                "✉️ *Сообщение отправлено администратору.*\n\n"
+                "Ожидайте ответа, он придет сюда же.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при пересылке сообщения админу: {e}")
+            await update.message.reply_text(
+                "❌ Не удалось отправить сообщение администратору. Пожалуйста, попробуйте позже."
+            )
+
+        # В режиме чата с админом не переключаемся в другие режимы
+        return
+
     # Проверяем, находится ли пользователь в режиме отзыва
     if context.user_data.get('feedback_mode'):
         # Убираем режим отзыва

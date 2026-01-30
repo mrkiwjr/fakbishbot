@@ -19,11 +19,12 @@ from bot.handlers.menu import (
     menu_start,
     handle_leave_feedback,
     handle_text_message,  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
-    menu_callback, 
-    help_command, 
+    menu_callback,
+    help_command,
     # УБРАЛ: handle_book_pc_message - теперь объединено в handle_text_message
-    FEEDBACK
+    FEEDBACK,
 )
+from bot.handlers.user import handle_admin_reply
 from bot.handlers.admin import (
     admin_panel,
     button_callback,
@@ -197,7 +198,13 @@ def setup_handlers(application: Application):
     # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
 
-    # ОБНОВЛЕННЫЙ обработчик сообщений - один для всех текстовых сообщений
+    # Обработчик ответов админа на сообщения пользователей (должен идти ДО общего текстового хэндлера)
+    application.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.User(ADMIN_ID) & filters.REPLY,
+        handle_admin_reply
+    ))
+
+    # ОБНОВЛЕННЫЙ обработчик сообщений - один для всех текстовых сообщений пользователей
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
         handle_text_message  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
