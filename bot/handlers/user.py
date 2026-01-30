@@ -41,10 +41,10 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f\"Не удалось отправить ответ администратора пользователю {user_id}: {e}\")
+        logger.error(f"Не удалось отправить ответ администратора пользователю {user_id}: {e}")
         try:
             await message.reply_text(
-                \"❌ Не удалось доставить ответ пользователю. Возможно, он заблокировал бота.\"
+                "❌ Не удалось доставить ответ пользователю. Возможно, он заблокировал бота."
             )
         except Exception:
             pass
