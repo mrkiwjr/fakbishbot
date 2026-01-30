@@ -515,15 +515,17 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
 
+    # Для админа показываем админскую справку, но кнопка связи с админом есть для всех,
+    # чтобы можно было тестировать функционал.
     if user_id == ADMIN_ID:
         text = HELP_ADMIN_MESSAGE
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
     else:
         text = HELP_USER_MESSAGE
-        keyboard = [
-            [InlineKeyboardButton("💬 Связаться с админом", callback_data="contact_admin")],
-            [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
-        ]
+
+    keyboard = [
+        [InlineKeyboardButton("💬 Связаться с админом", callback_data="contact_admin")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
+    ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -560,10 +562,10 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                "🟢 *Новый диалог с пользователем*\n\n"
-                f"👤 Имя: {escape_html(user.first_name or 'Не указано')}\n"
-                f"📱 Username: {escape_html(username)}\n"
-                f"🆔 ID: `{user.id}`\n\n"
+                "*Новый диалог с пользователем*\n\n"
+                f"Имя: {escape_html(user.first_name or 'Не указано')}\n"
+                f"Username: {escape_html(username)}\n"
+                f"ID: `{user.id}`\n\n"
                 "Ответьте *ответом* на пересланные ботом сообщения, чтобы пользователь получил ответ."
             ),
             parse_mode='Markdown'
