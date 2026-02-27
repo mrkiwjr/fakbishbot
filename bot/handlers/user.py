@@ -1,5 +1,4 @@
 import logging
-import re
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -36,19 +35,11 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     user_id = None
 
-    # 1) Если админ отвечает "реплаем" — пытаемся извлечь ID из текста карточки
+    # 1) Если админ отвечает реплаем — определяем user_id по связке message_id
     if message.reply_to_message:
-        original_text = message.reply_to_message.text or ""
-        match = re.search(
-            r"Идентификатор пользователя:\s*<code>(\d+)</code>|ID:\s*<code>(\d+)</code>|ID:\s*(\d+)",
-            original_text
-        )
-        if match:
-            user_id_str = match.group(1) or match.group(2) or match.group(3)
-            try:
-                user_id = int(user_id_str)
-            except ValueError:
-                user_id = None
+        chat_id = message.chat_id
+        msg_id = message.reply_to_message.message_id
+        user_id = support_chat.get_user_by_admin_message(chat_id, msg_id)
 
     # 2) Если не реплай — шлём в текущий активный чат админа (если выбран)
     if user_id is None:

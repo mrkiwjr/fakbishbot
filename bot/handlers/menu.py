@@ -436,11 +436,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Не удалось уведомить пользователя о начале диалога: {e}")
 
-        # Обновляем сообщение у админа
+        # Обновляем сообщение у админа и запоминаем его для снятия кнопки при завершении
         keyboard = [[InlineKeyboardButton("Завершить чат", callback_data=f"support_end:{user_id}")]]
-        await update.callback_query.edit_message_reply_markup(
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        q = update.callback_query
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        support_chat.add_message_with_end_button(user_id, q.message.chat_id, q.message.message_id)
 
     elif data.startswith("support_reject:"):
         # Админ отклонил запрос
@@ -464,11 +464,21 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_reply_markup(reply_markup=None)
 
     elif data.startswith("support_end:"):
-        # Завершение чата
+        # Завершение чата — убираем кнопку «Завершить чат» со всех сообщений админу
         try:
             user_id = int(data.split(":", 1)[1])
         except ValueError:
             return
+
+        for chat_id, msg_id in support_chat.get_message_ids_with_end_button(user_id):
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    reply_markup=None,
+                )
+            except Exception as e:
+                logger.debug(f"Не удалось убрать кнопку с сообщения {msg_id}: {e}")
 
         support_chat.end(user_id=user_id)
 
@@ -483,8 +493,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
-
-        await update.callback_query.edit_message_reply_markup(reply_markup=None)
 
 
 async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -715,19 +723,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
                 admin_message = (
                     "<b>Запрос на диалог</b>\n\n"
-                    f"Идентификатор пользователя: <code>{user.id}</code>\n"
                     f"Имя: {escaped_first_name}\n"
                     f"Имя пользователя: {escaped_username}\n\n"
                     f"<b>Первичное сообщение:</b>\n{escaped_message}\n\n"
                     "Для начала переписки выберите действие ниже."
                 )
 
-                await context.bot.send_message(
+                sent = await context.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=admin_message,
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                 )
+                support_chat.link_admin_message(ADMIN_ID, sent.message_id, user.id)
 
                 await update.message.reply_text(
                     "Ваше обращение зарегистрировано.\n\n"
@@ -742,24 +750,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
                 admin_message = (
                     "<b>Сообщение в активном диалоге</b>\n\n"
-                    f"Идентификатор пользователя: <code>{user.id}</code>\n"
                     f"Имя: {escaped_first_name}\n"
                     f"Имя пользователя: {escaped_username}\n\n"
                     f"<b>Текст сообщения:</b>\n{escaped_message}"
                 )
 
-                await context.bot.send_message(
+                sent = await context.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=admin_message,
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                 )
-
-                await update.message.reply_text(
-                    "Ваше сообщение передано администратору.\n\n"
-                    "Ответ будет направлен в этот диалог.",
-                    parse_mode="Markdown",
-                )
+                support_chat.link_admin_message(ADMIN_ID, sent.message_id, user.id)
+                support_chat.add_message_with_end_button(user.id, ADMIN_ID, sent.message_id)
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения админу: {e}")
             await update.message.reply_text(
