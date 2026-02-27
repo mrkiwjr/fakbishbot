@@ -198,9 +198,10 @@ def setup_handlers(application: Application):
     # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
 
-    # Обработчик ответов админа на сообщения пользователей (должен идти ДО общего текстового хэндлера)
+    # Обработчик сообщений админа в саппорт-чате (реплай или сообщение в активный чат)
+    # Должен идти ДО общего текстового хэндлера пользователей.
     application.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.User(ADMIN_ID) & filters.REPLY,
+        filters.ChatType.PRIVATE & filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
         handle_admin_reply
     ))
 

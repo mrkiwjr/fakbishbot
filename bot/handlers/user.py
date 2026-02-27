@@ -4,7 +4,18 @@ import re
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.services.support_chat import support_chat
+
 logger = logging.getLogger(__name__)
+
+def _escape_html(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20,33 +31,45 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """
     message = update.message
 
-    if not message or not message.reply_to_message:
+    if not message:
         return
 
-    original = message.reply_to_message
-    original_text = original.text or ""
+    user_id = None
 
-    # Ищем строку с ID: <число>
-    match = re.search(r"ID:\s*<code>(\d+)</code>|ID:\s*(\d+)", original_text)
-    if not match:
-        logger.debug("Не удалось извлечь ID пользователя из сообщения, пропускаем ответ админа")
+    # 1) Если админ отвечает "реплаем" — пытаемся извлечь ID из текста карточки
+    if message.reply_to_message:
+        original_text = message.reply_to_message.text or ""
+        match = re.search(
+            r"Идентификатор пользователя:\s*<code>(\d+)</code>|ID:\s*<code>(\d+)</code>|ID:\s*(\d+)",
+            original_text
+        )
+        if match:
+            user_id_str = match.group(1) or match.group(2) or match.group(3)
+            try:
+                user_id = int(user_id_str)
+            except ValueError:
+                user_id = None
+
+    # 2) Если не реплай — шлём в текущий активный чат админа (если выбран)
+    if user_id is None:
+        user_id = support_chat.get_admin_target(admin_id=update.effective_user.id)
+
+    if user_id is None:
+        # Ничего не делаем: админ написал сообщение не в контексте саппорта
         return
 
-    user_id_str = match.group(1) or match.group(2)
     try:
-        user_id = int(user_id_str)
-    except ValueError:
-        logger.debug("Извлечён некорректный ID пользователя, пропускаем ответ админа")
-        return
+        if not message.text:
+            return
 
-    try:
+        # Отправляем пользователю в HTML, чтобы не ломать Markdown символами
         await context.bot.send_message(
             chat_id=user_id,
             text=(
-                "*Ответ администратора:*\n\n"
-                f"{message.text}"
+                "<b>Ответ администратора</b>\n\n"
+                f"{_escape_html(message.text)}"
             ),
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
     except Exception as e:
         logger.error(f"Не удалось отправить ответ администратора пользователю {user_id}: {e}")

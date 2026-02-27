@@ -23,6 +23,7 @@ from bot.services.database import db
 from bot.services.subscription import check_subscription
 from bot.services.promo import promo_service
 from bot.services.photo_cache import photo_cache
+from bot.services.support_chat import support_chat
 from bot.middleware.message_cleanup import message_cleanup
 
 logger = logging.getLogger(__name__)
@@ -412,6 +413,79 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('admin_chat_mode', None)
         await handle_help(update, context)
 
+    elif data.startswith("support_accept:"):
+        # Админ принял чат с пользователем
+        try:
+            user_id = int(data.split(":", 1)[1])
+        except ValueError:
+            return
+
+        support_chat.start(user_id=user_id, admin_id=update.effective_user.id)
+
+        # Уведомляем пользователя
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "*Диалог начат.*\n\n"
+                    "Администратор подключился к обращению.\n"
+                    "Вы можете продолжать переписку в этом диалоге."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить пользователя о начале диалога: {e}")
+
+        # Обновляем сообщение у админа
+        keyboard = [[InlineKeyboardButton("Завершить чат", callback_data=f"support_end:{user_id}")]]
+        await update.callback_query.edit_message_reply_markup(
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("support_reject:"):
+        # Админ отклонил запрос
+        try:
+            user_id = int(data.split(":", 1)[1])
+        except ValueError:
+            return
+
+        support_chat.end(user_id=user_id)
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "Обращение получено, но в настоящий момент администратор недоступен.\n"
+                    "Пожалуйста, повторите попытку позже."
+                ),
+            )
+        except Exception:
+            pass
+
+        await update.callback_query.edit_message_reply_markup(reply_markup=None)
+
+    elif data.startswith("support_end:"):
+        # Завершение чата
+        try:
+            user_id = int(data.split(":", 1)[1])
+        except ValueError:
+            return
+
+        support_chat.end(user_id=user_id)
+
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "*Диалог завершён.*\n\n"
+                    "При необходимости вы можете снова воспользоваться функцией связи с администратором."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+
+        await update.callback_query.edit_message_reply_markup(reply_markup=None)
+
 
 async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -557,23 +631,7 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode='Markdown'
     )
 
-    # Уведомляем админа, что пользователь начал диалог
-    try:
-        username = f"@{user.username}" if user.username else "нет username"
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "<b>Новый диалог с пользователем</b>\n\n"
-                f"Идентификатор пользователя: <code>{user.id}</code>\n"
-                f"Имя: {escape_html(user.first_name or 'Не указано')}\n"
-                f"Имя пользователя: {escape_html(username)}\n\n"
-                "Дальнейшие сообщения этого пользователя будут поступать в данный чат.\n"
-                "Для отправки ответа пользователю необходимо ответить на соответствующее сообщение в формате «Ответить»."
-            ),
-            parse_mode='HTML'
-        )
-    except Exception as e:
-        logger.warning(f"Не удалось уведомить админа о начале диалога: {e}")
+    # Уведомление администратору отправляем при первом сообщении клиента (будет кнопка "Начать чат")
 
 
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -643,25 +701,65 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             escaped_username = escape_html(username)
             escaped_message = escape_html(message_text)
 
-            admin_message = (
-                "<b>Новое сообщение от пользователя</b>\n\n"
-                f"Идентификатор пользователя: <code>{user.id}</code>\n"
-                f"Имя: {escaped_first_name}\n"
-                f"Имя пользователя: {escaped_username}\n\n"
-                f"<b>Текст сообщения:</b>\n{escaped_message}"
-            )
+            # Если чат ещё не принят админом — шлём "запрос" с кнопкой "Начать чат"
+            if not support_chat.is_active(user.id):
+                if not support_chat.is_pending(user.id):
+                    support_chat.set_pending(user.id)
 
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=admin_message,
-                parse_mode="HTML",
-            )
+                keyboard = [
+                    [
+                        InlineKeyboardButton("Начать чат", callback_data=f"support_accept:{user.id}"),
+                        InlineKeyboardButton("Отклонить", callback_data=f"support_reject:{user.id}")
+                    ]
+                ]
 
-            await update.message.reply_text(
-                "Ваше сообщение передано администратору.\n\n"
-                "Ответ будет направлен в этот диалог.",
-                parse_mode="Markdown",
-            )
+                admin_message = (
+                    "<b>Запрос на диалог</b>\n\n"
+                    f"Идентификатор пользователя: <code>{user.id}</code>\n"
+                    f"Имя: {escaped_first_name}\n"
+                    f"Имя пользователя: {escaped_username}\n\n"
+                    f"<b>Первичное сообщение:</b>\n{escaped_message}\n\n"
+                    "Для начала переписки выберите действие ниже."
+                )
+
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=admin_message,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+
+                await update.message.reply_text(
+                    "Ваше обращение зарегистрировано.\n\n"
+                    "После подключения администратора ответ будет направлен в этот диалог.",
+                    parse_mode="Markdown",
+                )
+            else:
+                # Чат активен — отправляем сообщение админу и даём кнопку завершить чат
+                support_chat.set_admin_target(admin_id=ADMIN_ID, user_id=user.id)
+
+                keyboard = [[InlineKeyboardButton("Завершить чат", callback_data=f"support_end:{user.id}")]]
+
+                admin_message = (
+                    "<b>Сообщение в активном диалоге</b>\n\n"
+                    f"Идентификатор пользователя: <code>{user.id}</code>\n"
+                    f"Имя: {escaped_first_name}\n"
+                    f"Имя пользователя: {escaped_username}\n\n"
+                    f"<b>Текст сообщения:</b>\n{escaped_message}"
+                )
+
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=admin_message,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+
+                await update.message.reply_text(
+                    "Ваше сообщение передано администратору.\n\n"
+                    "Ответ будет направлен в этот диалог.",
+                    parse_mode="Markdown",
+                )
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения админу: {e}")
             await update.message.reply_text(
