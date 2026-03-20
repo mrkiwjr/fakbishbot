@@ -12,6 +12,7 @@ def _find_photo_path(base_dir: str, name: str) -> Optional[str]:
     return None
 
 BOT_TOKEN: Final[str] = os.getenv("BOT_TOKEN", "")
+PROXY_URL: Final[Optional[str]] = os.getenv("PROXY_URL")
 ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_ID: Final[int] = int(os.getenv("CHANNEL_ID", "0"))
 CHANNEL_USERNAME: Final[str] = os.getenv("CHANNEL_USERNAME", "")

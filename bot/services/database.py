@@ -107,7 +107,6 @@ class Database:
         await conn.execute("PRAGMA foreign_keys=ON")
 
     async def add_user(self, user_id: int, first_name: str, username: Optional[str] = None) -> bool:
-        # Нормализуем username в нижний регистр
         username = username.lower() if username else None
         async with aiosqlite.connect(self.db_path) as conn:
             try:
@@ -120,17 +119,7 @@ class Database:
             except aiosqlite.IntegrityError:
                 return False
 
-    async def get_user(self, user_id: int) -> Optional[dict]:
-        async with aiosqlite.connect(self.db_path) as conn:
-            conn.row_factory = aiosqlite.Row
-            async with conn.execute(
-                "SELECT * FROM users WHERE user_id = ?", (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return dict(row) if row else None
-
     async def get_user_by_username(self, username: str) -> Optional[dict]:
-        # Регистронезависимый поиск
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
@@ -140,7 +129,6 @@ class Database:
                 return dict(row) if row else None
 
     async def get_user_by_id(self, user_id: int) -> Optional[dict]:
-        # Теперь правильно используем aiosqlite
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
@@ -231,8 +219,6 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    # ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ НОВОГО ФУНКЦИОНАЛА
-
     async def has_user_received_any_promo(self, user_id: int) -> bool:
         async with aiosqlite.connect(self.db_path) as conn:
             async with conn.execute("""
@@ -299,14 +285,7 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def execute(self, query: str, params: tuple = ()) -> aiosqlite.Cursor:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cursor = await conn.execute(query, params)
-            await conn.commit()
-            return cursor
-
     async def add_admin(self, user_id: int, first_name: str, added_by: int, username: Optional[str] = None) -> bool:
-        # Нормализуем username
         username = username.lower() if username else None
         async with aiosqlite.connect(self.db_path) as conn:
             try:
@@ -360,5 +339,5 @@ class Database:
             return cursor.rowcount
 
 
-# Создаём экземпляр базы данных
+
 db = Database()

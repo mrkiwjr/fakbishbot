@@ -35,25 +35,21 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     user_id = None
 
-    # 1) Если админ отвечает реплаем — определяем user_id по связке message_id
     if message.reply_to_message:
         chat_id = message.chat_id
         msg_id = message.reply_to_message.message_id
         user_id = support_chat.get_user_by_admin_message(chat_id, msg_id)
 
-    # 2) Если не реплай — шлём в текущий активный чат админа (если выбран)
     if user_id is None:
         user_id = support_chat.get_admin_target(admin_id=update.effective_user.id)
 
     if user_id is None:
-        # Ничего не делаем: админ написал сообщение не в контексте саппорта
         return
 
     try:
         if not message.text:
             return
 
-        # Отправляем пользователю в HTML, чтобы не ломать Markdown символами
         await context.bot.send_message(
             chat_id=user_id,
             text=(

@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 MAIN, PROMO, HELP, BOOK_PC, FEEDBACK, PROMOTIONS, TARIFFS = range(7)
 
-# Константы для обработки таймаутов
 MAX_RETRY_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 1.0
 
@@ -63,7 +62,6 @@ async def send_text_message(
                     response = None
 
                     if cached_file_id:
-                        # Попытка отправки с retry логикой
                         for attempt in range(MAX_RETRY_ATTEMPTS):
                             try:
                                 response = await update.effective_chat.send_photo(
@@ -111,7 +109,6 @@ async def send_text_message(
                 except Exception as e:
                     logger.warning(f"Ошибка отправки фото для {photo_key}: {e}")
 
-    # Отправка текстового сообщения с retry логикой
     for attempt in range(MAX_RETRY_ATTEMPTS):
         try:
             response = await update.effective_chat.send_message(
@@ -187,7 +184,6 @@ async def send_menu_with_photo(
         cached_file_id = photo_cache.get_file_id(photo_key, photo_path)
 
         if cached_file_id:
-            # Попытка отправки с кешированным file_id с retry логикой
             success = False
             for attempt in range(MAX_RETRY_ATTEMPTS):
                 try:
@@ -211,7 +207,6 @@ async def send_menu_with_photo(
                     logger.warning(f"Ошибка использования кешированного file_id для {photo_key}: {cache_error}")
                     break
             
-            # Если не удалось отправить с file_id, пробуем через файл
             if not success:
                 try:
                     with open(photo_path, 'rb') as photo_file:
@@ -240,7 +235,6 @@ async def send_menu_with_photo(
                     logger.error(f"Ошибка при отправке фото через файл: {e}")
                     return await send_text_fallback()
         else:
-            # Отправка фото без кеша с retry логикой
             success = False
             with open(photo_path, 'rb') as photo_file:
                 for attempt in range(MAX_RETRY_ATTEMPTS):
@@ -323,24 +317,7 @@ async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await message_cleanup.cleanup_user_command(update, context)
-
-    keyboard = [
-        [
-            InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
-            InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
-        ],
-        [
-            InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
-            InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
-        ],
-        [
-            InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
-            InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await send_menu_with_photo(update, context, "main", MENU_MAIN, reply_markup)
+    await show_main_menu(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -368,7 +345,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == str(MAIN):
-        # Сбрасываем все режимы ввода при возврате в главное меню
         context.user_data.pop('booking_mode', None)
         context.user_data.pop('feedback_mode', None)
         context.user_data.pop('winter_drop_mode', None)
@@ -384,12 +360,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_book_pc(update, context)
 
     elif data == str(FEEDBACK):
-        # Сбрасываем режим отзыва при возврате в раздел отзывов
         context.user_data.pop('feedback_mode', None)
         await handle_feedback(update, context)
 
     elif data == str(PROMOTIONS):
-        # Сбрасываем режим WINTER DROP при возврате в раздел акций
         context.user_data.pop('winter_drop_mode', None)
         await handle_promotions(update, context)
 
@@ -409,12 +383,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_contact_admin(update, context)
 
     elif data == "end_admin_chat":
-        # Выходим из режима чата с админом и возвращаемся в раздел помощи
         context.user_data.pop('admin_chat_mode', None)
         await handle_help(update, context)
 
     elif data.startswith("support_accept:"):
-        # Админ принял чат с пользователем
         try:
             user_id = int(data.split(":", 1)[1])
         except ValueError:
@@ -422,7 +394,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         support_chat.start(user_id=user_id, admin_id=update.effective_user.id)
 
-        # Уведомляем пользователя
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -436,14 +407,12 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Не удалось уведомить пользователя о начале диалога: {e}")
 
-        # Обновляем сообщение у админа и запоминаем его для снятия кнопки при завершении
         keyboard = [[InlineKeyboardButton("Завершить чат", callback_data=f"support_end:{user_id}")]]
         q = update.callback_query
         await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         support_chat.add_message_with_end_button(user_id, q.message.chat_id, q.message.message_id)
 
     elif data.startswith("support_reject:"):
-        # Админ отклонил запрос
         try:
             user_id = int(data.split(":", 1)[1])
         except ValueError:
@@ -464,7 +433,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_reply_markup(reply_markup=None)
 
     elif data.startswith("support_end:"):
-        # Завершение чата — убираем кнопку «Завершить чат» со всех сообщений админу
         try:
             user_id = int(data.split(":", 1)[1])
         except ValueError:
@@ -519,7 +487,6 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ПРОВЕРЯЕМ используя существующий метод can_receive_promo
     can_receive, reason = await promo_service.can_receive_promo(user_id)
     
     if not can_receive:
@@ -536,7 +503,6 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo_key="promo"
             )
         elif reason == "already_received":
-            # Если уже получал - показываем его текущий промокод
             last_promo = await promo_service.get_last_received_promo(user_id)
             if last_promo:
                 await send_text_message(
@@ -559,11 +525,9 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
 
-    # Если может получить - выдаем новый случайный промокод
     received_promo = await promo_service.get_random_active_promo()
-    
+
     if received_promo:
-        # Отмечаем что пользователь получил промокод
         await promo_service.mark_promo_received(user_id, received_promo["code"])
         
         keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=str(MAIN))]]
@@ -582,7 +546,7 @@ async def handle_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await send_text_message(
             update,
             context,
@@ -597,8 +561,6 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
 
-    # Для админа показываем админскую справку, но кнопка связи с админом есть для всех,
-    # чтобы можно было тестировать функционал.
     if user_id == ADMIN_ID:
         text = HELP_ADMIN_MESSAGE
     else:
@@ -619,7 +581,6 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     user = update.effective_user
 
-    # Включаем режим чата с админом и выключаем остальные режимы
     context.user_data['admin_chat_mode'] = True
     context.user_data.pop('booking_mode', None)
     context.user_data.pop('feedback_mode', None)
@@ -639,13 +600,10 @@ async def handle_contact_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode='Markdown'
     )
 
-    # Уведомление администратору отправляем при первом сообщении клиента (будет кнопка "Начать чат")
-
 
 async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    # Включаем режим брони и выключаем другие режимы ввода текста
     context.user_data['booking_mode'] = True
     context.user_data.pop('feedback_mode', None)
     context.user_data.pop('winter_drop_mode', None)
@@ -659,10 +617,9 @@ async def handle_book_pc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    # Выключаем другие режимы ввода текста
     context.user_data.pop('booking_mode', None)
     context.user_data.pop('winter_drop_mode', None)
-    context.user_data.pop('feedback_mode', None)  # Сбрасываем режим отзыва
+    context.user_data.pop('feedback_mode', None)
 
     keyboard = [
         [InlineKeyboardButton("💬 Оставить отзыв", callback_data="leave_feedback")],
@@ -674,11 +631,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_leave_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало процесса оставления отзыва - просим пользователя написать отзыв"""
+    """Принять отзыв: активировать режим ввода."""
     query = update.callback_query
-    
-    # Сохраняем состояние что пользователь оставляет отзыв,
-    # и выключаем остальные режимы, если они были
+
     context.user_data['feedback_mode'] = True
     context.user_data.pop('booking_mode', None)
     context.user_data.pop('winter_drop_mode', None)
@@ -701,7 +656,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.message.chat.type != 'private':
         return
 
-    # Если пользователь в режиме живого диалога с админом
     if context.user_data.get('admin_chat_mode'):
         try:
             username = f"@{user.username}" if user.username else "нет username"
@@ -709,7 +663,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             escaped_username = escape_html(username)
             escaped_message = escape_html(message_text)
 
-            # Если чат ещё не принят админом — шлём "запрос" с кнопкой "Начать чат"
             if not support_chat.is_active(user.id):
                 if not support_chat.is_pending(user.id):
                     support_chat.set_pending(user.id)
@@ -743,7 +696,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     parse_mode="Markdown",
                 )
             else:
-                # Чат активен — отправляем сообщение админу и даём кнопку завершить чат
                 support_chat.set_admin_target(admin_id=ADMIN_ID, user_id=user.id)
 
                 keyboard = [[InlineKeyboardButton("Завершить чат", callback_data=f"support_end:{user.id}")]]
@@ -772,17 +724,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         # В режиме чата с админом не переключаемся в другие режимы
         return
 
-    # Проверяем, находится ли пользователь в режиме отзыва
     if context.user_data.get('feedback_mode'):
-        # Убираем режим отзыва
         context.user_data.pop('feedback_mode', None)
-        
-        # Экранируем специальные символы HTML для безопасного отображения
+
         escaped_first_name = escape_html(user.first_name or 'Не указано')
         escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
         escaped_feedback = escape_html(message_text)
-        
-        # Формируем сообщение для канала ОТЗЫВ с HTML разметкой
+
         admin_message = (
             f"💬 <b>НОВЫЙ ОТЗЫВ!</b>\n\n"
             f"<b>Пользователь:</b>\n"
@@ -792,14 +740,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         try:
-            # Отправляем отзыв в канал
             await context.bot.send_message(
                 chat_id=NOTIFICATION_CHAT_ID,
                 text=admin_message,
                 parse_mode='HTML'
             )
-            
-            # Подтверждение пользователю
+
             await update.message.reply_text(
                 "✅ *Спасибо за ваш отзыв!*\n\nВаши отзывы помогают нам становиться лучше! 🥷",
                 parse_mode='Markdown'
@@ -811,21 +757,16 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "❌ Произошла ошибка при отправке отзыва. Пожалуйста, попробуйте позже."
             )
         
-        # Возвращаем в главное меню
         await show_main_menu(update, context)
 
     else:
-        # Проверяем, находится ли пользователь в режиме участия в KATANA WINTER DROP
         if context.user_data.get('winter_drop_mode'):
-            # Убираем режим WINTER DROP
             context.user_data.pop('winter_drop_mode', None)
 
-            # Экранируем специальные символы HTML для безопасного отображения
             escaped_first_name = escape_html(user.first_name or 'Не указано')
             escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
             escaped_message = escape_html(message_text)
-            
-            # Формируем сообщение для канала с HTML разметкой
+
             admin_message = (
                 f"🎯 <b>KATANA WINTER DROP!</b>\n\n"
                 f"<b>Участник:</b>\n"
@@ -835,14 +776,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
             try:
-                # Отправляем данные участника в канал
                 await context.bot.send_message(
                     chat_id=NOTIFICATION_CHAT_ID,
                     text=admin_message,
                     parse_mode='HTML'
                 )
 
-                # Подтверждение пользователю
                 await update.message.reply_text(
                     "✅ *Заявка на участие принята!*\n\nМы получили ваши данные и свяжемся с вами при необходимости.",
                     parse_mode='Markdown'
@@ -854,19 +793,15 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже."
                 )
 
-            # Возвращаем в главное меню
             await show_main_menu(update, context)
 
-        # Если пользователь в режиме брони
         elif context.user_data.get('booking_mode'):
-            # Убираем режим брони
             context.user_data.pop('booking_mode', None)
 
-            # Экранируем специальные символы HTML для безопасного отображения
             escaped_first_name = escape_html(user.first_name or 'Не указано')
             escaped_username = escape_html(f'@{user.username}' if user.username else 'нет username')
             escaped_booking = escape_html(message_text)
-            
+
             admin_message = (
                 f"🎯 <b>НОВАЯ БРОНЬ!</b>\n\n"
                 f"<b>Клиент:</b>\n"
@@ -876,14 +811,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
             try:
-                # Отправляем в канал
                 await context.bot.send_message(
                     chat_id=NOTIFICATION_CHAT_ID,
                     text=admin_message,
                     parse_mode='HTML'
                 )
 
-                # Подтверждение пользователю
                 await update.message.reply_text(
                     "✅ *Заявка принята!*\n\nМы получили ваши данные и скоро свяжемся с вами для подтверждения брони.",
                     parse_mode='Markdown'
@@ -895,12 +828,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже или свяжитесь с администратором."
                 )
 
-            # Возвращаем в главное меню
             await show_main_menu(update, context)
 
         else:
-            # Если пользователь не в одном из специальных режимов,
-            # просто показываем главное меню и ничего никуда не отправляем
             await show_main_menu(update, context)
 
 
@@ -956,11 +886,9 @@ async def handle_subscribe_check(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_winter_drop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало процесса участия в KATANA WINTER DROP — просим пользователя ввести данные"""
+    """Активировать режим ввода данных для KATANA WINTER DROP."""
     query = update.callback_query
 
-    # Сохраняем состояние, что пользователь заполняет данные для розыгрыша,
-    # и выключаем остальные режимы
     context.user_data['winter_drop_mode'] = True
     context.user_data.pop('feedback_mode', None)
     context.user_data.pop('booking_mode', None)

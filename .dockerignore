@@ -16,7 +16,8 @@ build/
 .idea/
 *.log
 *.md
-data/database.json
+data/
+promo_files/
 .DS_Store
 .env.example
 !bot/media/

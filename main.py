@@ -13,15 +13,14 @@ from telegram.ext import (
 )
 from telegram.error import TimedOut, NetworkError
 
-from bot.config import BOT_TOKEN, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
+from bot.config import BOT_TOKEN, PROXY_URL, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
 from bot.services.database import db
 from bot.handlers.menu import (
     menu_start,
     handle_leave_feedback,
-    handle_text_message,  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
+    handle_text_message,
     menu_callback,
     help_command,
-    # УБРАЛ: handle_book_pc_message - теперь объединено в handle_text_message
     FEEDBACK,
 )
 from bot.handlers.user import handle_admin_reply
@@ -79,10 +78,7 @@ async def setup_bot_commands(application: Application):
         BotCommand("help", "Показать справку"),
     ]
 
-    # Устанавливаем команды для всех пользователей
     await application.bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
-
-    # Устанавливаем специальные команды для администратора
     await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 
@@ -134,9 +130,7 @@ async def init_application(application: Application):
 
 
 def setup_handlers(application: Application):
-    """Настройка всех обработчиков"""
-    
-    # ConversationHandler для администратора
+    """Настройка всех обработчиков."""
     admin_conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(
@@ -187,56 +181,47 @@ def setup_handlers(application: Application):
         allow_reentry=True
     )
 
-    # Основные обработчики команд
     application.add_handler(CommandHandler("start", menu_start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_panel))
 
-    # ConversationHandler для администратора
     application.add_handler(admin_conv_handler)
 
-    # Обработчики callback запросов для пользовательского меню
     application.add_handler(CallbackQueryHandler(menu_callback))
 
-    # Обработчик сообщений админа в саппорт-чате (реплай или сообщение в активный чат)
-    # Должен идти ДО общего текстового хэндлера пользователей.
     application.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
         handle_admin_reply
     ))
 
-    # ОБНОВЛЕННЫЙ обработчик сообщений - один для всех текстовых сообщений пользователей
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-        handle_text_message  # ИЗМЕНИЛОСЬ: handle_feedback_message -> handle_text_message
+        handle_text_message
     ))
 
 
 def main():
-    """Основная функция запуска бота"""
-    # Проверка обязательных переменных окружения
+    """Точка входа."""
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN не установлен в .env файле")
 
     if ADMIN_ID == 0:
         raise ValueError("ADMIN_ID не установлен в .env файле")
 
-    # Настройка логирования
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Запуск бота...")
 
     try:
-        # Создание приложения
-        application = Application.builder().token(BOT_TOKEN).post_init(init_application).build()
+        builder = Application.builder().token(BOT_TOKEN).post_init(init_application)
+        if PROXY_URL:
+            builder = builder.proxy(PROXY_URL).get_updates_proxy(PROXY_URL)
+        application = builder.build()
 
-        # Добавление глобального обработчика ошибок
         application.add_error_handler(error_handler)
 
-        # Настройка обработчиков
         setup_handlers(application)
 
-        # Запуск бота
         logger.info("Бот запущен успешно")
         application.run_polling(
             allowed_updates=["message", "callback_query"],

@@ -21,10 +21,10 @@ class SupportChatService:
 
     def __init__(self):
         self.pending_users: set[int] = set()
-        self.active_sessions: dict[int, SupportSession] = {}  # user_id -> session
-        self.admin_current_target: dict[int, int] = {}  # admin_id -> user_id
-        self.admin_message_to_user: dict[tuple[int, int], int] = {}  # (chat_id, message_id) -> user_id
-        self.user_chat_message_ids: dict[int, list[tuple[int, int]]] = {}  # user_id -> [(chat_id, msg_id), ...]
+        self.active_sessions: dict[int, SupportSession] = {}
+        self.admin_current_target: dict[int, int] = {}
+        self.admin_message_to_user: dict[tuple[int, int], int] = {}
+        self.user_chat_message_ids: dict[int, list[tuple[int, int]]] = {}
 
     def is_pending(self, user_id: int) -> bool:
         return user_id in self.pending_users
@@ -50,7 +50,6 @@ class SupportChatService:
     def end(self, user_id: int) -> None:
         session = self.active_sessions.pop(user_id, None)
         if session:
-            # если у админа был выбран именно этот пользователь — сбрасываем
             if self.admin_current_target.get(session.admin_id) == user_id:
                 self.admin_current_target.pop(session.admin_id, None)
         self.clear_pending(user_id)

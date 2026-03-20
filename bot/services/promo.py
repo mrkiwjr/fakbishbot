@@ -41,12 +41,10 @@ class PromoService:
         if not can_receive:
             return None
 
-        # Получаем случайный промокод
         promo = await self.get_random_active_promo()
         if not promo:
             return None
 
-        # Записываем что пользователь получил промокод
         await self.mark_promo_received(user_id, promo["code"])
 
         return promo
@@ -88,5 +86,5 @@ class PromoService:
         return await db.deactivate_promo(code)
 
 
-# Создаем экземпляр сервиса
+
 promo_service = PromoService()

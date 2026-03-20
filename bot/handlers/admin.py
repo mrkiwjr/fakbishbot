@@ -1,5 +1,6 @@
 import os
 import logging
+import functools
 from typing import Optional
 from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -36,6 +37,7 @@ def is_super_admin(user_id: int) -> bool:
 
 
 def admin_required(func):
+    @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_user_admin(update.effective_user.id):
             await update.message.reply_text(ADMIN_ONLY_MESSAGE)
@@ -45,6 +47,7 @@ def admin_required(func):
 
 
 def super_admin_required(func):
+    @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_super_admin(update.effective_user.id):
             if update.callback_query:
@@ -94,49 +97,21 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ed
             context
         )
     else:
-        await update.message.reply_text(
+        response = await update.effective_chat.send_message(
             text=ADMIN_PANEL_MAIN,
             reply_markup=reply_markup
+        )
+        await message_cleanup.track_bot_message(
+            update.effective_chat.id,
+            response.message_id,
+            context
         )
 
 
 @admin_required
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await message_cleanup.cleanup_user_command(update, context)
-
-    user_id = update.effective_user.id
-    keyboard = [
-        [
-            InlineKeyboardButton("➕ Добавить промокод", callback_data="add_promo"),
-            InlineKeyboardButton("📋 Список промокодов", callback_data="list_promos")
-        ],
-        [
-            InlineKeyboardButton("📁 Загрузить файл с промокодами", callback_data="upload_promo_file")
-        ],
-        [
-            InlineKeyboardButton("📜 История выдачи", callback_data="promo_history")
-        ],
-        [
-            InlineKeyboardButton("📊 Статистика", callback_data="stats"),
-            InlineKeyboardButton("📤 Рассылка", callback_data="broadcast_menu")
-        ]
-    ]
-
-    if is_super_admin(user_id):
-        keyboard.append([
-            InlineKeyboardButton("👥 Управление админами", callback_data="manage_admins")
-        ])
-
-    response = await update.effective_chat.send_message(
-        text=ADMIN_PANEL_MAIN,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-    await message_cleanup.track_bot_message(
-        update.effective_chat.id,
-        response.message_id,
-        context
-    )
+    await show_admin_menu(update, context, edit=False)
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,6 +183,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("Выберите промокод для удаления:", reply_markup=reply_markup)
+        return ConversationHandler.END
 
     elif query.data.startswith("delete_"):
         code = query.data.replace("delete_", "")
@@ -756,11 +732,9 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return AWAITING_ADMIN_ID
 
-    # Попробуем распарсить как ID
     user_id = None
     username = None
 
-    # Удаляем возможный префикс "ID"
     clean_input = input_text.strip().lower().replace("id", "").strip()
 
     if clean_input.isdigit():
@@ -783,7 +757,6 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return AWAITING_ADMIN_ID
 
-    # Ищем пользователя
     user = None
     if user_id:
         user = await db.get_user_by_id(user_id)

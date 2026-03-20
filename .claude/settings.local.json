@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@194.87.236.151 \"echo connected && cat /etc/os-release | head -3\")",
+      "Bash(\"/c/Program Files/PuTTY/plink\" -ssh root@194.87.236.151 -pw \"4RdJw2uyE6\" -batch \"echo connected && uname -a\")",
+      "Bash(\"/c/Program Files/PuTTY/plink\" -ssh root@194.87.236.151 -pw \"4RdJw2uyE6\" -batch \"cat /etc/docker/daemon.json 2>/dev/null || echo ''NO FILE''\")"
+    ]
+  }
+}
