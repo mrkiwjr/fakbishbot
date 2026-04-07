@@ -1,6 +1,12 @@
 import time
+import logging
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+MAX_MESSAGE_LINKS = 500
 
 
 @dataclass
@@ -23,7 +29,7 @@ class SupportChatService:
         self.pending_users: set[int] = set()
         self.active_sessions: dict[int, SupportSession] = {}
         self.admin_current_target: dict[int, int] = {}
-        self.admin_message_to_user: dict[tuple[int, int], int] = {}
+        self.admin_message_to_user: OrderedDict[tuple[int, int], int] = OrderedDict()
         self.user_chat_message_ids: dict[int, list[tuple[int, int]]] = {}
 
     def is_pending(self, user_id: int) -> bool:
@@ -54,6 +60,7 @@ class SupportChatService:
                 self.admin_current_target.pop(session.admin_id, None)
         self.clear_pending(user_id)
         self.user_chat_message_ids.pop(user_id, None)
+        self._cleanup_message_links(user_id)
 
     def add_message_with_end_button(self, user_id: int, chat_id: int, message_id: int) -> None:
         """Добавить сообщение с кнопкой «Завершить чат» для последующего снятия со всех."""
@@ -74,6 +81,16 @@ class SupportChatService:
     def link_admin_message(self, chat_id: int, message_id: int, user_id: int) -> None:
         """Связать сообщение админу с пользователем (для ответа реплаем)."""
         self.admin_message_to_user[(chat_id, message_id)] = user_id
+        self._trim_message_links()
+
+    def _cleanup_message_links(self, user_id: int) -> None:
+        keys_to_remove = [k for k, v in self.admin_message_to_user.items() if v == user_id]
+        for key in keys_to_remove:
+            self.admin_message_to_user.pop(key, None)
+
+    def _trim_message_links(self) -> None:
+        while len(self.admin_message_to_user) > MAX_MESSAGE_LINKS:
+            self.admin_message_to_user.popitem(last=False)
 
     def get_user_by_admin_message(self, chat_id: int, message_id: int) -> Optional[int]:
         """Получить user_id по сообщению, на которое админ отвечает."""

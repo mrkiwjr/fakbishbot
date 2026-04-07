@@ -1,22 +1,27 @@
 import logging
+import time
 from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes, BaseHandler
 
 logger = logging.getLogger(__name__)
 
+MAX_TRACKED_CHATS = 1000
+TRACKED_CHAT_TTL = 86400
+
 
 class MessageCleanupMiddleware:
 
     def __init__(self):
-        self.tracked_messages = {}
+        self.tracked_messages: dict[int, set[int]] = {}
+        self._last_access: dict[int, float] = {}
 
     async def track_bot_message(self, chat_id: int, message_id: int, context: ContextTypes.DEFAULT_TYPE):
         await self.cleanup_all_except(chat_id, message_id, context)
 
-        if chat_id not in self.tracked_messages:
-            self.tracked_messages[chat_id] = set()
         self.tracked_messages[chat_id] = {message_id}
+        self._last_access[chat_id] = time.monotonic()
+        self._evict_stale()
 
         context.user_data["active_menu_message"] = message_id
 
@@ -62,6 +67,18 @@ class MessageCleanupMiddleware:
                 logger.info(f"Удалено старое сообщение: {msg_id}")
             except Exception as e:
                 logger.debug(f"Не удалось удалить сообщение {msg_id}: {e}")
+
+    def _evict_stale(self):
+        now = time.monotonic()
+        stale = [cid for cid, ts in self._last_access.items() if now - ts > TRACKED_CHAT_TTL]
+        for cid in stale:
+            self.tracked_messages.pop(cid, None)
+            self._last_access.pop(cid, None)
+
+        while len(self._last_access) > MAX_TRACKED_CHATS:
+            oldest = min(self._last_access, key=self._last_access.get)
+            self.tracked_messages.pop(oldest, None)
+            self._last_access.pop(oldest, None)
 
 
 message_cleanup = MessageCleanupMiddleware()

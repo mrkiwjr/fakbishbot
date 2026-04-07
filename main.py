@@ -1,5 +1,6 @@
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 
 from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from telegram.ext import (
@@ -52,14 +53,21 @@ from bot.handlers.admin import (
 
 
 def setup_logging():
-    """Настройка логирования"""
+    """Настройка логирования с ротацией файлов"""
     os.makedirs(os.path.dirname(LOGS_PATH), exist_ok=True)
+
+    file_handler = RotatingFileHandler(
+        LOGS_PATH,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8"
+    )
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler(LOGS_PATH, encoding="utf-8"),
+            file_handler,
             logging.StreamHandler()
         ]
     )
@@ -107,6 +115,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning(f"Ошибка сети при обработке обновления: {error}")
     else:
         logger.error(f"Необработанная ошибка: {error}", exc_info=error)
+
+
+async def shutdown_application(application: Application):
+    """Корректное завершение приложения"""
+    logger = logging.getLogger(__name__)
+    await db.close()
+    logger.info("Приложение остановлено, ресурсы освобождены")
 
 
 async def init_application(application: Application):
@@ -213,7 +228,7 @@ def main():
     logger.info("Запуск бота...")
 
     try:
-        builder = Application.builder().token(BOT_TOKEN).post_init(init_application)
+        builder = Application.builder().token(BOT_TOKEN).post_init(init_application).post_shutdown(shutdown_application)
         if PROXY_URL:
             builder = builder.proxy(PROXY_URL).get_updates_proxy(PROXY_URL)
         application = builder.build()
