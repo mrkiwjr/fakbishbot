@@ -21,3 +21,4 @@ promo_files/
 .DS_Store
 .env.example
 !bot/media/
+.claude

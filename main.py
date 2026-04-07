@@ -16,6 +16,7 @@ from telegram.error import TimedOut, NetworkError
 
 from bot.config import BOT_TOKEN, PROXY_URL, ADMIN_ID, LOGS_PATH, PROMO_CHECK_INTERVAL_HOURS
 from bot.services.database import db
+from bot.api.server import start_api_server
 from bot.handlers.menu import (
     menu_start,
     handle_leave_feedback,
@@ -120,6 +121,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def shutdown_application(application: Application):
     """Корректное завершение приложения"""
     logger = logging.getLogger(__name__)
+
+    api_runner = application.bot_data.get("api_runner")
+    if api_runner:
+        await api_runner.cleanup()
+        logger.info("API сервер остановлен")
+
     await db.close()
     logger.info("Приложение остановлено, ресурсы освобождены")
 
@@ -130,6 +137,9 @@ async def init_application(application: Application):
 
     await db.init_db()
     await setup_bot_commands(application)
+
+    api_runner = await start_api_server(bot=application.bot)
+    application.bot_data["api_runner"] = api_runner
 
     job_queue = application.job_queue
     if job_queue:

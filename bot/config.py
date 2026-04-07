@@ -34,6 +34,8 @@ MIN_PROMO_DAYS: Final[int] = 1
 MAX_PROMO_DAYS: Final[int] = 365
 MAX_PROMO_CODE_LENGTH: Final[int] = 100
 
+WEBAPP_URL: Final[str] = os.getenv("WEBAPP_URL", "https://katana-bot.duckdns.org")
+
 MENU_PHOTOS_DIR: Final[str] = os.path.join(os.path.dirname(__file__), "media", "menu")
 
 def _init_menu_photos() -> dict[str, Optional[str]]:

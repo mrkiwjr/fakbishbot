@@ -1,11 +1,11 @@
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile, WebAppInfo
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest, TimedOut, NetworkError
 import os
 import logging
 import asyncio
 
-from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID, MENU_PHOTOS
+from bot.config import CHANNEL_USERNAME, ADMIN_ID, ADMIN_USERNAME, NOTIFICATION_CHAT_ID, MENU_PHOTOS, WEBAPP_URL
 from bot.constants import (
     MENU_MAIN,
     NOT_SUBSCRIBED_MESSAGE,
@@ -289,22 +289,27 @@ async def send_menu_with_photo(
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
+    # keyboard = [
+    #     [
+    #         InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
+    #         InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
+    #     ],
+    #     [
+    #         InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
+    #         InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
+    #     ],
+    #     [
+    #         InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
+    #         InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
+    #     ]
+    # ]
+    # reply_markup = InlineKeyboardMarkup(keyboard)
+    webapp_url = WEBAPP_URL
     keyboard = [
-        [
-            InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
-            InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
-        ],
-        [
-            InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
-            InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
-        ],
-        [
-            InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
-            InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
-        ]
+        [InlineKeyboardButton("🌐 Открыть приложение", web_app=WebAppInfo(url=webapp_url))]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_menu_with_photo(update, context, "main", MENU_MAIN, reply_markup, edit=edit)
+    text = MENU_MAIN + "\n\nKATANA × CYBER SPACE 🥷"
+    await send_menu_with_photo(update, context, "main", text, InlineKeyboardMarkup(keyboard), edit=edit)
 
 
 async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -838,7 +843,6 @@ async def handle_promotions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
     keyboard = [
-        [InlineKeyboardButton("❄️ KATANA WINTER DROP", callback_data="winter_drop")],
         [InlineKeyboardButton("🔙 Назад", callback_data=str(MAIN))]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
