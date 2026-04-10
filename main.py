@@ -163,7 +163,7 @@ def setup_handlers(application: Application):
         entry_points=[
             CallbackQueryHandler(
                 button_callback,
-                pattern="^(admin_main|add_promo|list_promos|promo_history|stats|broadcast_menu|delete_promo_menu|upload_promo_file|delete_.*|manage_admins|add_admin|remove_admin_menu|remove_admin_.*|cancel)$"
+                pattern="^(admin_main|add_promo|list_promos|promo_history|stats|broadcast_menu|delete_promo_menu|upload_promo_file|delete_.*|manage_admins|add_admin|remove_admin_menu|remove_admin_.*|scheduled_list|cancel_sched_.*|cancel)$"
             )
         ],
         states={

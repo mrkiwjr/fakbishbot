@@ -115,6 +115,12 @@ export const api = {
     })
   },
 
+  getScheduledBroadcasts: () =>
+    request<{ scheduled: { id: string; schedule_at: string; text: string; media_type: string | null }[] }>('/api/admin/broadcast/scheduled'),
+
+  cancelScheduledBroadcast: (taskId: string) =>
+    request<{ success: boolean }>(`/api/admin/broadcast/scheduled/${taskId}`, { method: 'DELETE' }),
+
   getAdmins: () =>
     request<{ admins: Admin[]; super_admin_id: number }>('/api/admin/admins'),
 

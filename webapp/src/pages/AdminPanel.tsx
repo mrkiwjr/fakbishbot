@@ -35,6 +35,8 @@ export default function AdminPanel() {
   const [broadcastVideoName, setBroadcastVideoName] = useState('')
   const [broadcastSchedule, setBroadcastSchedule] = useState('')
   const [broadcastConfirm, setBroadcastConfirm] = useState(false)
+  const [scheduledBroadcasts, setScheduledBroadcasts] = useState<{ id: string; schedule_at: string; text: string; media_type: string | null }[]>([])
+
   const [adminUsername, setAdminUsername] = useState('')
 
   useEffect(() => {
@@ -274,7 +276,12 @@ export default function AdminPanel() {
                   else if (s === 'history') loadHistory()
                   else if (s === 'admins') loadAdmins()
                   else if (s === 'users') loadUsers()
-                  else setSection(s)
+                  else {
+                    if (s === 'broadcast') {
+                      api.getScheduledBroadcasts().then(r => setScheduledBroadcasts(r.scheduled)).catch(() => {})
+                    }
+                    setSection(s)
+                  }
                 }}
               />}
 
@@ -471,6 +478,30 @@ export default function AdminPanel() {
                         </button>
                       </div>
                     </>
+                  )}
+
+                  {scheduledBroadcasts.length > 0 && (
+                    <div className="mt-6 space-y-2">
+                      <p className="text-k-dim text-[11px] font-mono tracking-wider uppercase">Запланированные</p>
+                      {scheduledBroadcasts.map(s => (
+                        <div key={s.id} className="bg-k-card/60 border border-k-border/50 rounded-xl p-3 flex items-center gap-3">
+                          <div className="flex-1 min-w-0 text-left">
+                            <p className="text-[12px] text-k-muted">{s.schedule_at.replace('T', ' ')}</p>
+                            <p className="text-[11px] text-k-dim truncate">{s.text}</p>
+                          </div>
+                          <button onClick={async () => {
+                            try {
+                              await api.cancelScheduledBroadcast(s.id)
+                              setScheduledBroadcasts(prev => prev.filter(t => t.id !== s.id))
+                              setSuccess('Рассылка отменена')
+                            } catch (e: any) { setError(e.message) }
+                          }}
+                            className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 active:scale-95 transition-transform shrink-0">
+                            <Trash2 size={14} className="text-red-400" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

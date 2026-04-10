@@ -13,6 +13,7 @@ from bot.services.promo import promo_service
 logger = logging.getLogger(__name__)
 
 _rate_limits: dict[str, list[float]] = defaultdict(list)
+from bot.services.scheduler import schedule_broadcast as _schedule, cancel as _cancel_schedule, get_all as _get_scheduled
 _broadcast_last: float = 0
 RATE_LIMIT_WINDOW = 60
 RATE_LIMIT_MAX = 10
@@ -242,16 +243,18 @@ async def broadcast(request):
             media_type = "video"
             await msg.delete()
 
-        import asyncio
-        asyncio.get_event_loop().call_later(
-            delay,
-            lambda: asyncio.ensure_future(
-                _execute_scheduled_broadcast(bot, text, media_file_id, media_type)
-            )
-        )
+        b = bot
+        t = text
+        mfid = media_file_id
+        mt = media_type
 
-        logger.info(f"[API] Рассылка запланирована на {schedule_at}")
-        return web.json_response({"scheduled": True, "schedule_at": schedule_at})
+        async def execute():
+            await _execute_scheduled_broadcast(b, t, mfid, mt)
+
+        task_id = _schedule(delay, execute, text, schedule_at, media_type)
+
+        logger.info(f"[API] Рассылка {task_id} запланирована на {schedule_at}")
+        return web.json_response({"scheduled": True, "schedule_at": schedule_at, "task_id": task_id})
 
     photo_file_id = None
     video_file_id = None
@@ -422,6 +425,19 @@ async def submit_feedback(request):
         return web.json_response({"error": "send failed"}, status=500)
 
 
+@require_admin
+async def get_scheduled_broadcasts(request):
+    return web.json_response({"scheduled": _get_scheduled()})
+
+
+@require_admin
+async def cancel_scheduled_broadcast(request):
+    task_id = request.match_info["task_id"]
+    if not _cancel_schedule(task_id):
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response({"success": True})
+
+
 def setup_routes(app: web.Application):
     app.router.add_get("/api/health", health)
     app.router.add_get("/api/admin/check", check_admin_status)
@@ -432,6 +448,8 @@ def setup_routes(app: web.Application):
     app.router.add_get("/api/admin/promo-history", get_promo_history)
     app.router.add_get("/api/admin/users", get_users)
     app.router.add_post("/api/admin/broadcast", broadcast)
+    app.router.add_get("/api/admin/broadcast/scheduled", get_scheduled_broadcasts)
+    app.router.add_delete("/api/admin/broadcast/scheduled/{task_id}", cancel_scheduled_broadcast)
     app.router.add_get("/api/admin/admins", get_admins)
     app.router.add_post("/api/admin/admins", add_admin_user)
     app.router.add_delete("/api/admin/admins/{user_id}", remove_admin_user)

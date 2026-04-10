@@ -255,7 +255,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     elif query.data == "broadcast_menu":
-        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        from bot.services.scheduler import get_all as get_scheduled
+        scheduled = get_scheduled()
+
+        keyboard = []
+        if scheduled:
+            keyboard.append([InlineKeyboardButton(f"📋 Запланированные ({len(scheduled)})", callback_data="scheduled_list")])
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "Введите текст сообщения для рассылки:",
@@ -263,6 +269,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["admin_message_id"] = query.message.message_id
         return AWAITING_BROADCAST_TEXT
+
+    elif query.data == "scheduled_list":
+        from bot.services.scheduler import get_all as get_scheduled
+        scheduled = get_scheduled()
+
+        if not scheduled:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=ADMIN_MAIN)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Нет запланированных рассылок", reply_markup=reply_markup)
+            return ConversationHandler.END
+
+        text = "📋 *Запланированные рассылки:*\n\n"
+        keyboard = []
+        for task in scheduled:
+            sched_time = task["schedule_at"].replace("T", " ")
+            media = ""
+            if task.get("media_type") == "photo":
+                media = " 📸"
+            elif task.get("media_type") == "video":
+                media = " 🎬"
+            text += f"🕐 `{sched_time}`{media}\n`{task['text']}`\n\n"
+            keyboard.append([InlineKeyboardButton(f"🗑 {sched_time}", callback_data=f"cancel_sched_{task['id']}")])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=ADMIN_MAIN)])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return ConversationHandler.END
+
+    elif query.data.startswith("cancel_sched_"):
+        from bot.services.scheduler import cancel as cancel_schedule
+        task_id = query.data.replace("cancel_sched_", "")
+
+        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if cancel_schedule(task_id):
+            await query.edit_message_text("✅ Запланированная рассылка отменена", reply_markup=reply_markup)
+        else:
+            await query.edit_message_text("❌ Рассылка не найдена", reply_markup=reply_markup)
+        return ConversationHandler.END
 
     elif query.data == "manage_admins":
         if not is_super_admin(update.effective_user.id):
@@ -738,16 +784,20 @@ async def receive_broadcast_schedule(update: Update, context: ContextTypes.DEFAU
 
         delay = (scheduled_time - datetime.now()).total_seconds()
 
-        import asyncio
         from bot.services.broadcast import broadcast_service
+        from bot.services.scheduler import schedule_broadcast
 
         bot = context.bot
+        bt = broadcast_text
+        pid = photo_file_id
+        vid = video_file_id
 
         async def execute():
-            result = await broadcast_service.send_broadcast(bot, broadcast_text, photo_file_id, video_file_id)
+            result = await broadcast_service.send_broadcast(bot, bt, pid, vid)
             logger.info(f"Запланированная рассылка выполнена: отправлено {result['sent']}, ошибок {result['failed']}")
 
-        asyncio.get_event_loop().call_later(delay, lambda: asyncio.ensure_future(execute()))
+        media_type = "video" if video_file_id else ("photo" if photo_file_id else None)
+        schedule_broadcast(delay, execute, broadcast_text, scheduled_time.strftime("%Y-%m-%dT%H:%M"), media_type)
 
         keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
