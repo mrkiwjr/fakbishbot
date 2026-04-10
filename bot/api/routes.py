@@ -184,6 +184,8 @@ async def broadcast(request):
     reader = await request.multipart()
     text = ""
     photo_bytes = None
+    video_bytes = None
+    schedule_at = ""
 
     while True:
         part = await reader.next()
@@ -195,6 +197,12 @@ async def broadcast(request):
             photo_bytes = await part.read()
             if len(photo_bytes) > 10 * 1024 * 1024:
                 return web.json_response({"error": "photo too large (max 10MB)"}, status=400)
+        elif part.name == "video":
+            video_bytes = await part.read()
+            if len(video_bytes) > 50 * 1024 * 1024:
+                return web.json_response({"error": "video too large (max 50MB)"}, status=400)
+        elif part.name == "schedule_at":
+            schedule_at = (await part.text()).strip()
 
     if not text:
         return web.json_response({"error": "empty text"}, status=400)
@@ -202,25 +210,77 @@ async def broadcast(request):
     _broadcast_last = now
 
     from bot.services.broadcast import broadcast_service
+    from io import BytesIO
     bot = request.app.get("bot")
 
     if not bot:
         return web.json_response({"error": "bot not available"}, status=500)
 
-    photo_file_id = None
-    if photo_bytes:
-        from io import BytesIO
-        msg = await bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=BytesIO(photo_bytes),
-            caption="[upload for broadcast]"
+    if schedule_at:
+        from datetime import datetime
+        try:
+            scheduled_time = datetime.strptime(schedule_at, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            return web.json_response({"error": "invalid schedule format"}, status=400)
+
+        now_dt = datetime.now()
+        if scheduled_time <= now_dt:
+            return web.json_response({"error": "schedule must be in the future"}, status=400)
+
+        delay = (scheduled_time - now_dt).total_seconds()
+
+        media_file_id = None
+        media_type = None
+        if photo_bytes:
+            msg = await bot.send_photo(chat_id=ADMIN_ID, photo=BytesIO(photo_bytes), caption="[upload]")
+            media_file_id = msg.photo[-1].file_id
+            media_type = "photo"
+            await msg.delete()
+        elif video_bytes:
+            msg = await bot.send_video(chat_id=ADMIN_ID, video=BytesIO(video_bytes), caption="[upload]", supports_streaming=True)
+            media_file_id = msg.video.file_id
+            media_type = "video"
+            await msg.delete()
+
+        import asyncio
+        asyncio.get_event_loop().call_later(
+            delay,
+            lambda: asyncio.ensure_future(
+                _execute_scheduled_broadcast(bot, text, media_file_id, media_type)
+            )
         )
+
+        logger.info(f"[API] Рассылка запланирована на {schedule_at}")
+        return web.json_response({"scheduled": True, "schedule_at": schedule_at})
+
+    photo_file_id = None
+    video_file_id = None
+    if photo_bytes:
+        msg = await bot.send_photo(chat_id=ADMIN_ID, photo=BytesIO(photo_bytes), caption="[upload]")
         photo_file_id = msg.photo[-1].file_id
         await msg.delete()
+    elif video_bytes:
+        msg = await bot.send_video(chat_id=ADMIN_ID, video=BytesIO(video_bytes), caption="[upload]", supports_streaming=True)
+        video_file_id = msg.video.file_id
+        await msg.delete()
 
-    result = await broadcast_service.send_broadcast(bot, text, photo_file_id)
+    result = await broadcast_service.send_broadcast(bot, text, photo_file_id, video_file_id)
     logger.info(f"[API] Рассылка: отправлено {result['sent']}, ошибок {result['failed']}")
     return web.json_response(result)
+
+
+async def _execute_scheduled_broadcast(bot, text, media_file_id, media_type):
+    from bot.services.broadcast import broadcast_service
+    photo_id = media_file_id if media_type == "photo" else None
+    video_id = media_file_id if media_type == "video" else None
+    result = await broadcast_service.send_broadcast(bot, text, photo_id, video_id)
+    logger.info(f"[API] Запланированная рассылка выполнена: отправлено {result['sent']}, ошибок {result['failed']}")
+
+
+@require_admin
+async def get_users(request):
+    users = await db.get_all_users()
+    return web.json_response({"users": users})
 
 
 @require_super_admin
@@ -370,6 +430,7 @@ def setup_routes(app: web.Application):
     app.router.add_post("/api/admin/promos", add_promo)
     app.router.add_delete("/api/admin/promos/{code}", delete_promo)
     app.router.add_get("/api/admin/promo-history", get_promo_history)
+    app.router.add_get("/api/admin/users", get_users)
     app.router.add_post("/api/admin/broadcast", broadcast)
     app.router.add_get("/api/admin/admins", get_admins)
     app.router.add_post("/api/admin/admins", add_admin_user)

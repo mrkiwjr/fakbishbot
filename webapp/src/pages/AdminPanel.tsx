@@ -6,11 +6,11 @@ import {
   Users, Trash2, X, ChevronRight, Loader2, Check, AlertCircle
 } from 'lucide-react'
 import { api } from '../lib/api'
-import type { Stats, Promo, PromoHistoryEntry, Admin } from '../lib/api'
+import type { Stats, Promo, PromoHistoryEntry, Admin, User } from '../lib/api'
 import PageBg from '../components/PageBg'
 import PageHeader from '../components/PageHeader'
 
-type Section = 'menu' | 'add_promo' | 'promos' | 'history' | 'stats' | 'broadcast' | 'admins'
+type Section = 'menu' | 'add_promo' | 'promos' | 'history' | 'stats' | 'users' | 'broadcast' | 'admins'
 
 export default function AdminPanel() {
   const navigate = useNavigate()
@@ -24,12 +24,16 @@ export default function AdminPanel() {
   const [promos, setPromos] = useState<Promo[]>([])
   const [history, setHistory] = useState<PromoHistoryEntry[]>([])
   const [admins, setAdmins] = useState<Admin[]>([])
+  const [users, setUsers] = useState<User[]>([])
 
   const [promoCode, setPromoCode] = useState('')
   const [promoDays, setPromoDays] = useState('7')
   const [broadcastText, setBroadcastText] = useState('')
   const [broadcastPhoto, setBroadcastPhoto] = useState<File | null>(null)
   const [broadcastPhotoPreview, setBroadcastPhotoPreview] = useState('')
+  const [broadcastVideo, setBroadcastVideo] = useState<File | null>(null)
+  const [broadcastVideoName, setBroadcastVideoName] = useState('')
+  const [broadcastSchedule, setBroadcastSchedule] = useState('')
   const [broadcastConfirm, setBroadcastConfirm] = useState(false)
   const [adminUsername, setAdminUsername] = useState('')
 
@@ -69,6 +73,17 @@ export default function AdminPanel() {
       const r = await api.getPromoHistory()
       setHistory(r.history)
       setSection('history')
+    } catch (e: any) { setError(e.message) }
+    setLoading(false)
+  }, [])
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true)
+    clearMessages()
+    try {
+      const r = await api.getUsers()
+      setUsers(r.users)
+      setSection('users')
     } catch (e: any) { setError(e.message) }
     setLoading(false)
   }, [])
@@ -127,15 +142,39 @@ export default function AdminPanel() {
     setBroadcastPhotoPreview('')
   }
 
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBroadcastVideo(file)
+    setBroadcastVideoName(file.name)
+    handleRemovePhoto()
+  }
+
+  const handleRemoveVideo = () => {
+    setBroadcastVideo(null)
+    setBroadcastVideoName('')
+  }
+
   const handleBroadcast = async () => {
     if (!broadcastText.trim()) return
     setLoading(true)
     clearMessages()
     try {
-      const r = await api.broadcast(broadcastText.trim(), broadcastPhoto || undefined)
-      setSuccess(`Отправлено: ${r.sent}, ошибок: ${r.failed}`)
+      const r = await api.broadcast(
+        broadcastText.trim(),
+        broadcastPhoto || undefined,
+        broadcastVideo || undefined,
+        broadcastSchedule || undefined
+      )
+      if (r.scheduled) {
+        setSuccess(`Рассылка запланирована на ${r.schedule_at}`)
+      } else {
+        setSuccess(`Отправлено: ${r.sent}, ошибок: ${r.failed}`)
+      }
       setBroadcastText('')
       handleRemovePhoto()
+      handleRemoveVideo()
+      setBroadcastSchedule('')
       setBroadcastConfirm(false)
     } catch (e: any) { setError(e.message) }
     setLoading(false)
@@ -234,6 +273,7 @@ export default function AdminPanel() {
                   else if (s === 'promos') loadPromos()
                   else if (s === 'history') loadHistory()
                   else if (s === 'admins') loadAdmins()
+                  else if (s === 'users') loadUsers()
                   else setSection(s)
                 }}
               />}
@@ -318,6 +358,28 @@ export default function AdminPanel() {
                     <StatCard label="Неиспользованных" value={stats.unused_active_promos} color="orange" />
                     <StatCard label="Выдано" value={stats.total_issued} color="red" />
                   </div>
+                  <button onClick={loadUsers}
+                    className="w-full mt-4 py-3 rounded-xl bg-k-card/60 border border-k-border/50 font-display text-[16px] tracking-wider active:scale-[0.98] transition-transform cursor-pointer">
+                    КТО ЕСТЬ КТО
+                  </button>
+                </div>
+              )}
+
+              {section === 'users' && (
+                <div className="space-y-3">
+                  <SectionTitle title="ПОЛЬЗОВАТЕЛИ" count={users.length} />
+                  {users.length === 0 && <EmptyState text="Нет пользователей" />}
+                  {users.map(u => (
+                    <div key={u.user_id} className="bg-k-card/60 border border-k-border/50 rounded-xl p-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-[13px] font-medium">{u.first_name}</span>
+                        <span className="text-k-dim text-[10px] font-mono">{u.joined_at?.split(' ')[0]}</span>
+                      </div>
+                      <p className="text-k-dim text-[11px] mt-0.5">
+                        {u.username ? `@${u.username}` : 'no username'} &middot; ID: {u.user_id}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -336,21 +398,44 @@ export default function AdminPanel() {
                         />
                       </div>
                       <div>
-                        <Label text="Фото (необязательно)" />
+                        <Label text="Медиа (необязательно)" />
                         {broadcastPhotoPreview ? (
-                          <div className="relative inline-block">
+                          <div className="relative inline-block w-full">
                             <img src={broadcastPhotoPreview} alt="" className="w-full max-h-48 object-cover rounded-xl border border-k-border/50" />
                             <button onClick={handleRemovePhoto}
                               className="absolute top-2 right-2 w-7 h-7 rounded-full bg-k-black/80 border border-k-border flex items-center justify-center">
                               <X size={14} className="text-k-muted" />
                             </button>
                           </div>
+                        ) : broadcastVideoName ? (
+                          <div className="flex items-center gap-3 p-3 rounded-xl bg-k-card/60 border border-k-border/50">
+                            <span className="text-[13px] truncate flex-1">{broadcastVideoName}</span>
+                            <button onClick={handleRemoveVideo}
+                              className="w-7 h-7 rounded-full bg-k-black/80 border border-k-border flex items-center justify-center shrink-0">
+                              <X size={14} className="text-k-muted" />
+                            </button>
+                          </div>
                         ) : (
-                          <label className="block w-full py-4 rounded-xl bg-k-card/60 border border-k-border/50 border-dashed cursor-pointer active:scale-[0.98] transition-transform">
-                            <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
-                            <p className="text-k-dim text-[13px]">Нажмите для выбора фото</p>
-                          </label>
+                          <div className="flex gap-2">
+                            <label className="flex-1 py-4 rounded-xl bg-k-card/60 border border-k-border/50 border-dashed cursor-pointer active:scale-[0.98] transition-transform text-center">
+                              <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+                              <p className="text-k-dim text-[13px]">Фото</p>
+                            </label>
+                            <label className="flex-1 py-4 rounded-xl bg-k-card/60 border border-k-border/50 border-dashed cursor-pointer active:scale-[0.98] transition-transform text-center">
+                              <input type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
+                              <p className="text-k-dim text-[13px]">Видео</p>
+                            </label>
+                          </div>
                         )}
+                      </div>
+                      <div>
+                        <Label text="Запланировать (необязательно)" />
+                        <input
+                          type="datetime-local"
+                          className="input-field [color-scheme:dark]"
+                          value={broadcastSchedule}
+                          onChange={e => setBroadcastSchedule(e.target.value)}
+                        />
                       </div>
                       <button
                         onClick={() => broadcastText.trim() && setBroadcastConfirm(true)}
@@ -367,7 +452,13 @@ export default function AdminPanel() {
                         {broadcastPhotoPreview && (
                           <img src={broadcastPhotoPreview} alt="" className="w-full max-h-48 object-cover rounded-lg mb-3" />
                         )}
+                        {broadcastVideoName && (
+                          <p className="text-k-muted text-[12px] mb-3">Видео: {broadcastVideoName}</p>
+                        )}
                         <p className="text-[13px] whitespace-pre-wrap text-left">{broadcastText}</p>
+                        {broadcastSchedule && (
+                          <p className="text-k-orange text-[12px] mt-3">Запланировано: {broadcastSchedule.replace('T', ' ')}</p>
+                        )}
                       </div>
                       <div className="flex gap-3">
                         <button onClick={() => setBroadcastConfirm(false)}
@@ -376,7 +467,7 @@ export default function AdminPanel() {
                         </button>
                         <button onClick={handleBroadcast}
                           className="btn-primary flex-1 py-3 rounded-xl font-display text-[16px] tracking-wider text-white cursor-pointer">
-                          ОТПРАВИТЬ
+                          {broadcastSchedule ? 'ЗАПЛАНИРОВАТЬ' : 'ОТПРАВИТЬ'}
                         </button>
                       </div>
                     </>

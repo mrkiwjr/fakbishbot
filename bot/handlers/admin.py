@@ -20,7 +20,7 @@ from bot.middleware.message_cleanup import message_cleanup
 
 logger = logging.getLogger(__name__)
 
-AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE, AWAITING_ADMIN_ID, AWAITING_FILE_EXPIRY_DATE, AWAITING_FILE_EXPIRY_TIME = range(9)
+AWAITING_PROMO_CODE, AWAITING_PROMO_DAYS, AWAITING_BROADCAST_TEXT, AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST_CONFIRM, AWAITING_PROMO_FILE, AWAITING_ADMIN_ID, AWAITING_FILE_EXPIRY_DATE, AWAITING_FILE_EXPIRY_TIME, AWAITING_BROADCAST_SCHEDULE = range(10)
 ADMIN_MAIN = "admin_main"
 
 PROMO_FILES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'promo_files')
@@ -574,8 +574,11 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["broadcast_text"] = broadcast_text
 
         keyboard = [
-            [InlineKeyboardButton("📸 Добавить фото", callback_data="add_photo")],
-            [InlineKeyboardButton("🚫 Без фото", callback_data="skip_photo")]
+            [
+                InlineKeyboardButton("📸 Фото", callback_data="add_photo"),
+                InlineKeyboardButton("🎬 Видео", callback_data="add_video")
+            ],
+            [InlineKeyboardButton("🚫 Без медиа", callback_data="skip_photo")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -585,7 +588,7 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=message_id,
-                text=f"📝 Текст рассылки сохранен:\n\n`{preview_text}`\n\nХотите добавить фото?",
+                text=f"📝 Текст рассылки сохранен:\n\n`{preview_text}`\n\nХотите добавить медиа?",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
@@ -598,26 +601,28 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_broadcast_photo_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка выбора добавления фото"""
     query = update.callback_query
     await query.answer()
 
     if query.data == "add_photo":
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("📸 Отправьте фото для рассылки:", reply_markup=reply_markup)
+        context.user_data["awaiting_media"] = "photo"
+        return AWAITING_BROADCAST_PHOTO
 
-        await query.edit_message_text(
-            "📸 Отправьте фото для рассылки:",
-            reply_markup=reply_markup
-        )
+    elif query.data == "add_video":
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("🎬 Отправьте видео для рассылки:", reply_markup=reply_markup)
+        context.user_data["awaiting_media"] = "video"
         return AWAITING_BROADCAST_PHOTO
 
     elif query.data == "skip_photo":
-        return await show_broadcast_confirmation(update, context, photo_file_id=None)
+        return await show_broadcast_confirmation(update, context, photo_file_id=None, video_file_id=None)
 
 
 async def receive_broadcast_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка фото для рассылки"""
     message_id = context.user_data.get("admin_message_id")
 
     await update.message.delete()
@@ -625,20 +630,26 @@ async def receive_broadcast_photo(update: Update, context: ContextTypes.DEFAULT_
     if update.message.photo:
         photo = update.message.photo[-1]
         context.user_data["broadcast_photo_id"] = photo.file_id
+        return await show_broadcast_confirmation(update, context, photo_file_id=photo.file_id, video_file_id=None)
 
-        return await show_broadcast_confirmation(update, context, photo_file_id=photo.file_id)
+    if update.message.video:
+        video = update.message.video
+        context.user_data["broadcast_video_id"] = video.file_id
+        return await show_broadcast_confirmation(update, context, photo_file_id=None, video_file_id=video.file_id)
 
     return AWAITING_BROADCAST_PHOTO
 
 
-async def show_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_file_id: Optional[str]):
-    """Показать подтверждение рассылки"""
+async def show_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_file_id: Optional[str], video_file_id: Optional[str] = None):
     message_id = context.user_data.get("admin_message_id")
     broadcast_text = context.user_data.get("broadcast_text", "")
 
     keyboard = [
         [
-            InlineKeyboardButton("✅ Отправить", callback_data="broadcast_confirm"),
+            InlineKeyboardButton("✅ Отправить сейчас", callback_data="broadcast_confirm"),
+        ],
+        [
+            InlineKeyboardButton("🕐 Запланировать", callback_data="broadcast_schedule"),
             InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)
         ]
     ]
@@ -651,6 +662,8 @@ async def show_broadcast_confirmation(update: Update, context: ContextTypes.DEFA
 
     if photo_file_id:
         confirmation_text += "📸 *Фото:* прикреплено\n"
+    if video_file_id:
+        confirmation_text += "🎬 *Видео:* прикреплено\n"
 
     confirmation_text += f"\n📊 Будет отправлено *{users_count}* пользователям.\n\n*Подтвердите отправку:*"
 
@@ -675,8 +688,102 @@ async def show_broadcast_confirmation(update: Update, context: ContextTypes.DEFA
     return AWAITING_BROADCAST_CONFIRM
 
 
+async def handle_broadcast_schedule_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "broadcast_schedule":
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "🕐 Введите дату и время рассылки:\n\n"
+            "Формат: `ДД.ММ.ГГ ЧЧ:ММ`\n"
+            "Пример: `15.04.26 14:30`",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        context.user_data["admin_message_id"] = query.message.message_id
+        return AWAITING_BROADCAST_SCHEDULE
+
+    return ConversationHandler.END
+
+
+async def receive_broadcast_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_id = context.user_data.get("admin_message_id")
+    await update.message.delete()
+
+    time_input = update.message.text.strip()
+
+    try:
+        scheduled_time = datetime.strptime(time_input, "%d.%m.%y %H:%M")
+
+        if scheduled_time <= datetime.now():
+            keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=message_id,
+                    text="❌ Время должно быть в будущем.\n\nФормат: `ДД.ММ.ГГ ЧЧ:ММ`",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                pass
+            return AWAITING_BROADCAST_SCHEDULE
+
+        broadcast_text = context.user_data.get("broadcast_text")
+        photo_file_id = context.user_data.get("broadcast_photo_id")
+        video_file_id = context.user_data.get("broadcast_video_id")
+
+        delay = (scheduled_time - datetime.now()).total_seconds()
+
+        import asyncio
+        from bot.services.broadcast import broadcast_service
+
+        bot = context.bot
+
+        async def execute():
+            result = await broadcast_service.send_broadcast(bot, broadcast_text, photo_file_id, video_file_id)
+            logger.info(f"Запланированная рассылка выполнена: отправлено {result['sent']}, ошибок {result['failed']}")
+
+        asyncio.get_event_loop().call_later(delay, lambda: asyncio.ensure_future(execute()))
+
+        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=f"✅ *Рассылка запланирована*\n\n🕐 Дата: *{scheduled_time.strftime('%d.%m.%Y %H:%M')}*",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
+
+        logger.info(f"Рассылка запланирована на {scheduled_time}")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    except ValueError:
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data=ADMIN_MAIN)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text="❌ Неверный формат.\n\nФормат: `ДД.ММ.ГГ ЧЧ:ММ`\nПример: `15.04.26 14:30`",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
+        return AWAITING_BROADCAST_SCHEDULE
+
+
 async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Подтверждение и отправка рассылки"""
     query = update.callback_query
     await query.answer()
 
@@ -684,12 +791,13 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_id = context.user_data.get("admin_message_id")
         broadcast_text = context.user_data.get("broadcast_text")
         photo_file_id = context.user_data.get("broadcast_photo_id")
+        video_file_id = context.user_data.get("broadcast_video_id")
 
         if broadcast_text:
             await query.edit_message_text("📤 Рассылка запущена. Пожалуйста, подождите...")
 
             from bot.services.broadcast import broadcast_service
-            result = await broadcast_service.send_broadcast(context.bot, broadcast_text, photo_file_id)
+            result = await broadcast_service.send_broadcast(context.bot, broadcast_text, photo_file_id, video_file_id)
 
             keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data=ADMIN_MAIN)]]
             reply_markup = InlineKeyboardMarkup(keyboard)

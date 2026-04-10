@@ -836,6 +836,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await show_main_menu(update, context)
 
         else:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             await show_main_menu(update, context)
 
 

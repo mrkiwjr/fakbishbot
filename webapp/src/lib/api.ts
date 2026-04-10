@@ -61,6 +61,13 @@ export interface Admin {
   added_by: number
 }
 
+export interface User {
+  user_id: number
+  first_name: string
+  username: string | null
+  joined_at: string
+}
+
 export const api = {
   checkAdmin: () =>
     request<{ is_admin: boolean; is_super_admin: boolean }>('/api/admin/check'),
@@ -85,10 +92,15 @@ export const api = {
   getPromoHistory: () =>
     request<{ history: PromoHistoryEntry[] }>('/api/admin/promo-history'),
 
-  broadcast: (text: string, photo?: File) => {
+  getUsers: () =>
+    request<{ users: User[] }>('/api/admin/users'),
+
+  broadcast: (text: string, photo?: File, video?: File, scheduleAt?: string) => {
     const formData = new FormData()
     formData.append('text', text)
     if (photo) formData.append('photo', photo)
+    if (video) formData.append('video', video)
+    if (scheduleAt) formData.append('schedule_at', scheduleAt)
 
     return fetch(`${API_BASE}/api/admin/broadcast`, {
       method: 'POST',
@@ -99,7 +111,7 @@ export const api = {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || `HTTP ${res.status}`)
       }
-      return res.json() as Promise<{ sent: number; failed: number }>
+      return res.json() as Promise<{ sent: number; failed: number; scheduled?: boolean; schedule_at?: string }>
     })
   },
 

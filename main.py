@@ -35,10 +35,12 @@ from bot.handlers.admin import (
     receive_broadcast_text,
     receive_broadcast_photo,
     handle_broadcast_photo_choice,
+    handle_broadcast_schedule_choice,
     confirm_broadcast,
     receive_admin_id,
     receive_file_expiry_date,
     receive_file_expiry_time,
+    receive_broadcast_schedule,
     cancel,
     AWAITING_PROMO_CODE,
     AWAITING_PROMO_DAYS,
@@ -46,6 +48,7 @@ from bot.handlers.admin import (
     AWAITING_BROADCAST_TEXT,
     AWAITING_BROADCAST_PHOTO,
     AWAITING_BROADCAST_CONFIRM,
+    AWAITING_BROADCAST_SCHEDULE,
     AWAITING_ADMIN_ID,
     AWAITING_FILE_EXPIRY_DATE,
     AWAITING_FILE_EXPIRY_TIME,
@@ -189,12 +192,17 @@ def setup_handlers(application: Application):
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
             AWAITING_BROADCAST_PHOTO: [
-                MessageHandler(filters.PHOTO, receive_broadcast_photo),
-                CallbackQueryHandler(handle_broadcast_photo_choice, pattern="^(add_photo|skip_photo)$"),
+                MessageHandler(filters.PHOTO | filters.VIDEO, receive_broadcast_photo),
+                CallbackQueryHandler(handle_broadcast_photo_choice, pattern="^(add_photo|add_video|skip_photo)$"),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
             AWAITING_BROADCAST_CONFIRM: [
                 CallbackQueryHandler(confirm_broadcast, pattern="^broadcast_confirm$"),
+                CallbackQueryHandler(handle_broadcast_schedule_choice, pattern="^broadcast_schedule$"),
+                CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
+            ],
+            AWAITING_BROADCAST_SCHEDULE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_broadcast_schedule),
                 CallbackQueryHandler(button_callback, pattern=f"^{ADMIN_MAIN}$")
             ],
             AWAITING_ADMIN_ID: [

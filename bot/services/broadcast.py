@@ -14,17 +14,23 @@ BROADCAST_BATCH_SIZE = 100
 
 class BroadcastService:
     @staticmethod
-    async def send_broadcast(bot: Bot, message: str, photo_file_id: Optional[str] = None) -> dict:
+    async def send_broadcast(bot: Bot, message: str, photo_file_id: Optional[str] = None, video_file_id: Optional[str] = None) -> dict:
         user_ids = await db.get_all_user_ids()
         sent = 0
-        failed = 0
         failed_count = 0
 
         for i in range(0, len(user_ids), BROADCAST_BATCH_SIZE):
             batch = user_ids[i:i + BROADCAST_BATCH_SIZE]
             for user_id in batch:
                 try:
-                    if photo_file_id:
+                    if video_file_id:
+                        await bot.send_video(
+                            chat_id=user_id,
+                            video=video_file_id,
+                            caption=message if message else None,
+                            supports_streaming=True
+                        )
+                    elif photo_file_id:
                         await bot.send_photo(
                             chat_id=user_id,
                             photo=photo_file_id,
