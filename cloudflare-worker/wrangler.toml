@@ -1,0 +1,6 @@
+name = "katana-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+API_TARGET = "http://176.124.198.205:8080"

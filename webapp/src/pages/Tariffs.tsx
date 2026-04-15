@@ -58,7 +58,7 @@ export default function Tariffs() {
       </div>
 
       <p className="relative z-10 text-k-dim text-[12px] text-center mt-5 leading-relaxed">
-        * LOFT рассчитан на 5+ человек. Минимальная бронь — 3 часа.
+        * LOFT рассчитан на 5+ человек. Цена указана за 3х человек за каждого дополнительного - доплата 100₽.
       </p>
     </div>
   )

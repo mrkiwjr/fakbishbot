@@ -71,7 +71,15 @@
       "Bash(taskkill //F //PID 38020)",
       "Bash(\"/c/Program Files/PuTTY/plink.exe\" -ssh -P 22 root@176.124.198.205 -pw \"UPCkncB2MyEe\" \"echo connected\")",
       "Bash(\"/c/Program Files/PuTTY/plink.exe\" -ssh -P 22 root@176.124.198.205 -pw \"4BYqz8NbkWpP\" \"echo connected && free -h\")",
-      "Bash(reg delete:*)"
+      "Bash(reg delete:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('docker-compose.yml'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(docker-compose config:*)",
+      "Bash(CLOUDFLARE_API_TOKEN=cfut_1MbS9XqtwGMb1FMwkZyaKufrAhxtTXxcGDbtWqHc0af550e0 npx wrangler deploy)",
+      "Bash(CLOUDFLARE_API_TOKEN=cfut_1MbS9XqtwGMb1FMwkZyaKufrAhxtTXxcGDbtWqHc0af550e0 npx wrangler deployments list)",
+      "Bash(CLOUDFLARE_API_TOKEN=cfut_1MbS9XqtwGMb1FMwkZyaKufrAhxtTXxcGDbtWqHc0af550e0 npx wrangler pages deploy dist --project-name=katana-webapp)",
+      "Bash(CLOUDFLARE_API_TOKEN=cfut_1MbS9XqtwGMb1FMwkZyaKufrAhxtTXxcGDbtWqHc0af550e0 npx wrangler pages project create katana-webapp --production-branch=main)",
+      "Bash(CLOUDFLARE_API_TOKEN=cfut_1MbS9XqtwGMb1FMwkZyaKufrAhxtTXxcGDbtWqHc0af550e0 npx wrangler pages deploy dist --project-name=katana-webapp --commit-dirty=true)"
     ]
   }
 }
