@@ -289,28 +289,22 @@ async def send_menu_with_photo(
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False):
-    # keyboard = [
-    #     [
-    #         InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
-    #         InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
-    #     ],
-    #     [
-    #         InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
-    #         InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
-    #     ],
-    #     [
-    #         InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
-    #         InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
-    #     ]
-    # ]
-    # reply_markup = InlineKeyboardMarkup(keyboard)
-    webapp_url = WEBAPP_URL
     keyboard = [
-        [InlineKeyboardButton("🌐 Открыть приложение", web_app=WebAppInfo(url=webapp_url))]
+        [
+            InlineKeyboardButton("🎁 Промокод", callback_data=str(PROMO)),
+            InlineKeyboardButton("💻 Бронь", callback_data=str(BOOK_PC))
+        ],
+        [
+            InlineKeyboardButton("💰 Акции", callback_data=str(PROMOTIONS)),
+            InlineKeyboardButton("📊 Тарифы", callback_data=str(TARIFFS))
+        ],
+        [
+            InlineKeyboardButton("📝 Отзыв", callback_data=str(FEEDBACK)),
+            InlineKeyboardButton("❓ Помощь", callback_data=str(HELP))
+        ]
     ]
-    text = MENU_MAIN + "\n\nKATANA × CYBER SPACE 🥷"
-    await send_menu_with_photo(update, context, "main", text, InlineKeyboardMarkup(keyboard), edit=edit)
-
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await send_menu_with_photo(update, context, "main", MENU_MAIN, reply_markup, edit=edit)
 
 async def menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
